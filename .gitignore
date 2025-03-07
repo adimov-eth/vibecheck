@@ -34,6 +34,7 @@ Thumbs.db
 # Database
 *.sqlite
 *.db
+voice-processing.db
 
 # IDE
 .idea/
