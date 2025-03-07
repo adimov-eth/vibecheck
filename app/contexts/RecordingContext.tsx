@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 import { AnalysisResponse } from '../utils/apiService';
 
 interface RecordingData {
@@ -23,11 +23,23 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResponse | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
 
-  const clearRecordings = () => {
+  const clearRecordings = useCallback(() => {
     setRecordingData(null);
     setAnalysisResult(null);
     setConversationId(null);
-  };
+  }, []);
+
+  const setRecordingDataCallback = useCallback((data: RecordingData | null) => {
+    setRecordingData(data);
+  }, []);
+
+  const setAnalysisResultCallback = useCallback((result: AnalysisResponse | null) => {
+    setAnalysisResult(result);
+  }, []);
+
+  const setConversationIdCallback = useCallback((id: string | null) => {
+    setConversationId(id);
+  }, []);
 
   return (
     <RecordingContext.Provider 
@@ -35,9 +47,9 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         recordingData,
         analysisResult,
         conversationId,
-        setRecordingData,
-        setAnalysisResult,
-        setConversationId,
+        setRecordingData: setRecordingDataCallback,
+        setAnalysisResult: setAnalysisResultCallback,
+        setConversationId: setConversationIdCallback,
         clearRecordings,
       }}
     >

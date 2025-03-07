@@ -6,7 +6,9 @@
     "start": "bun index.ts",
     "worker:audio": "bun src/workers/audio.worker.ts",
     "worker:gpt": "bun src/workers/gpt.worker.ts",
-    "workers": "bun src/workers/audio.worker.ts && bun src/workers/gpt.worker.ts",
+    "workers": "bun src/workers/audio.worker.ts & bun src/workers/gpt.worker.ts",
+    "clean-queues": "bun src/scripts/clean-queues.ts",
+    "restart-conversation": "bun src/scripts/restart-conversation.ts",
     "db:generate": "drizzle-kit generate:sqlite",
     "db:migrate": "bun src/database/migrate.ts",
     "dev": "bun --watch index.ts"

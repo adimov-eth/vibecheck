@@ -83,7 +83,7 @@ const worker = new Worker(
       transcriptions
     );
     const gptResponse = await generateGptResponse(prompt);
-
+    console.log('GPT response:', gptResponse);
     await db
       .update(conversations)
       .set({ gptResponse, status: 'completed' })

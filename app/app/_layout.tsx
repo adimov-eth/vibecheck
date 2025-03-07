@@ -4,9 +4,19 @@ import { Stack } from 'expo-router'
 import { RecordingProvider } from '../contexts/RecordingContext'
 import { AuthTokenProvider } from '../contexts/AuthTokenContext'
 import ToastComponent from '../components/Toast'
+import { setupUploadQueue } from '../utils/backgroundUpload'
+import { useEffect } from 'react'
 
 export default function RootLayout() {
   const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!
+
+  // Initialize background upload task on app startup
+  useEffect(() => {
+    // Setup upload queue system with cleanup and processing
+    setupUploadQueue().catch(err => {
+      console.error('Failed to setup upload queue:', err);
+    });
+  }, []);
 
   return (
       <RecordingProvider>

@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 
 // Directory for storing audio recordings
-const AUDIO_DIRECTORY = `${FileSystem.documentDirectory}audio/`;
+export const AUDIO_DIRECTORY = `${FileSystem.documentDirectory}audio/`;
 
 // Ensure the audio directory exists
 export const ensureAudioDirectoryExists = async (): Promise<void> => {
@@ -23,13 +23,30 @@ export const generateAudioFilename = (prefix: string): string => {
 // Save a recording to the file system
 export const saveAudioRecording = async (
   uri: string,
+  conversationId: string,
   partnerPrefix: string
 ): Promise<string> => {
   try {
     await ensureAudioDirectoryExists();
     
-    const newFilename = generateAudioFilename(partnerPrefix);
-    const newUri = `${AUDIO_DIRECTORY}${newFilename}`;
+    // Use separate parameters rather than combining them in the caller
+    const filename = generateAudioFilename(partnerPrefix);
+    const newUri = `${AUDIO_DIRECTORY}${filename}`;
+    
+    // Save metadata about the recording for later reference
+    const metadata = {
+      conversationId,
+      partnerPrefix,
+      originalFilename: filename,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Store metadata alongside the file
+    const metadataUri = `${newUri}.metadata.json`;
+    await FileSystem.writeAsStringAsync(
+      metadataUri,
+      JSON.stringify(metadata)
+    );
     
     // Copy the temporary recording file to our app's documents directory
     await FileSystem.copyAsync({

@@ -5,9 +5,10 @@ import { v4 as uuid } from 'uuid';
 import { eq } from 'drizzle-orm';
 
 const router = express.Router();
+
 router.post('/', async (req, res, next) => {
   try {
-    const { mode, recordingType } = req.body;
+    const { id, mode, recordingType } = req.body;
     const allowedModes = ['mediator', 'counselor', 'dinner', 'movie'];
     const allowedRecordingTypes = ['separate', 'live'];
 
@@ -22,7 +23,37 @@ router.post('/', async (req, res, next) => {
         .json({ error: 'Invalid or missing recording type' });
     }
 
-    const conversationId = uuid();
+    // Generate a new ID if not provided or check if the provided ID already exists
+    let conversationId = id || uuid();
+
+    if (id) {
+      // Check if conversation with this ID already exists
+      const existingConversation = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, id))
+        .then(r => r[0]);
+
+      if (existingConversation) {
+        // If conversation exists, either return it or generate a new ID
+        if (
+          existingConversation.status === 'waiting' &&
+          existingConversation.mode === mode &&
+          existingConversation.recordingType === recordingType
+        ) {
+          // If it's the same parameters, return the existing conversation ID
+          return res.status(200).json({
+            conversationId: id,
+            note: 'Using existing conversation with this ID',
+          });
+        } else {
+          // Different parameters, generate a new ID instead
+          conversationId = uuid();
+        }
+      }
+    }
+
+    // Insert the new conversation
     await db.insert(conversations).values({
       id: conversationId,
       mode,
@@ -32,10 +63,33 @@ router.post('/', async (req, res, next) => {
       updatedAt: new Date(),
     });
     res.status(201).json({ conversationId });
-  } catch (error) {
+  } catch (error: any) {
+    console.error('Conversation creation error:', error);
+    if (error.message && error.message.includes('UNIQUE constraint failed')) {
+      // If we still somehow hit a unique constraint, generate a new ID and try again
+      const newId = uuid();
+      const { mode, recordingType } = req.body;
+      try {
+        await db.insert(conversations).values({
+          id: newId,
+          mode,
+          recordingType,
+          status: 'waiting',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        return res.status(201).json({
+          conversationId: newId,
+          note: 'Generated new ID due to conflict',
+        });
+      } catch (retryError) {
+        return next(retryError);
+      }
+    }
     next(error);
   }
 });
+
 router.get('/:conversationId', async (req, res, next) => {
   try {
     const { conversationId } = req.params;

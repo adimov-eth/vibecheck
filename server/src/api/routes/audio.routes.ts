@@ -49,7 +49,11 @@ router.post(
   upload.single('audio') as unknown as RequestHandler,
   async (req: CustomRequest, res: Response, next: NextFunction) => {
     try {
-      console.log('Audio upload endpoint hit');
+      console.log('Received upload request:', {
+        conversationId: req.body.conversationId,
+        file: !!req.file,
+      });
+
       const auth = getAuth(req);
       const { conversationId } = req.body;
       const userId = auth?.userId;

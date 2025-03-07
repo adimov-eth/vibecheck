@@ -47,7 +47,7 @@ const worker = new Worker(
     log(
       `Transcription completed in ${transcriptionDuration}ms. Length: ${transcription.length} characters`
     );
-
+    console.log('Transcription:', transcription);
     // Delete audio file
     log(`Deleting audio file: ${audio.audioFile}`);
     await deleteFile(audio.audioFile!);

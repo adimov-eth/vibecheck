@@ -6,6 +6,7 @@ import React, { useState } from 'react'
 import { Ionicons } from '@expo/vector-icons'
 import AppBar from '../components/AppBar'
 import Button from '../components/Button'
+import { ClearCacheButton } from '../components/ClearCacheButton'
 import { colors, typography, spacing, layout } from './styles'
 
 export default function Page() {
@@ -105,6 +106,17 @@ export default function Page() {
             )}
           </View>
         </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>App Data</Text>
+          
+          <View style={styles.card}>
+            <View style={styles.buttonContainer}>
+              <Text style={styles.buttonLabel}>Clear all cached recordings and conversation data</Text>
+              <ClearCacheButton buttonText="Clear Cache" />
+            </View>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   )
@@ -164,5 +176,16 @@ const styles = StyleSheet.create({
   },
   button: {
     marginBottom: spacing.md,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+  },
+  buttonLabel: {
+    ...typography.body2,
+    flex: 1,
+    marginRight: spacing.md,
   },
 })

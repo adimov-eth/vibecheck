@@ -3,6 +3,8 @@ import { useAuth } from '@clerk/clerk-expo';// Assuming useAuth is defined in au
 import * as FileSystem from "expo-file-system";
 import { Audio } from 'expo-av';
 import { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 
 const API_BASE_URL = "http://172.20.10.5:3000"; // Replace with your server URL
 
@@ -18,110 +20,90 @@ export interface AnalysisResponse {
 // Transform into proper React hook
 export function useApi() {
   const { getToken } = useAuth();
-  const [token, setToken] = useState<string | null>(null);
-  
-  // Get the token on mount and refresh periodically
+
+  const getFreshToken = async () => {
+    const token = await getToken();
+    if (!token) throw new Error("Authentication required");
+    await AsyncStorage.setItem('auth_token', token); // Update token for background tasks
+    return token;
+  };
+
   useEffect(() => {
-    let mounted = true;
-    
-    const fetchToken = async () => {
+    const refreshToken = async () => {
       try {
-        const fetchedToken = await getToken();
-        if (mounted && fetchedToken) {
-          console.log("Token successfully fetched");
-          setToken(fetchedToken);
-        } else if (mounted) {
-          console.error("Failed to get token: Token is empty");
+        const newToken = await getToken();
+        if (newToken) {
+          await AsyncStorage.setItem('auth_token', newToken);
         }
       } catch (error) {
-        if (mounted) {
-          console.error("Failed to get auth token:", error);
-        }
+        console.error('Failed to refresh token:', error);
       }
     };
-    
-    fetchToken();
-    
-    // Refresh token every 30 minutes
-    const refreshInterval = setInterval(fetchToken, 30 * 60 * 1000);
-    
-    return () => {
-      mounted = false;
-      clearInterval(refreshInterval);
-    };
+
+    refreshToken(); // Initial refresh
+    const interval = setInterval(refreshToken, 5 * 60 * 1000); // Refresh every 5 minutes
+
+    return () => clearInterval(interval);
   }, [getToken]);
-  
-  const Token = token;
-  // Define all the API methods as self-contained functions
-  const createConversation = async (mode: string, recordingType: "separate" | "live"): Promise<string> => {
-    if (!token) throw new Error("Authentication required");
-    
+
+  const createConversation = async (id: string, mode: string, recordingType: "separate" | "live"): Promise<string> => {
+    const token = await getFreshToken();
     const response = await fetch(`${API_BASE_URL}/conversations`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ mode, recordingType }),
+      body: JSON.stringify({ id, mode, recordingType }),
     });
+    
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Failed to create conversation");
+    
+    if (!response.ok) {
+      console.error("Conversation creation failed:", data.error || "Unknown error");
+      throw new Error(data.error || "Failed to create conversation");
+    }
+    
+    if (data.note) {
+      console.log("Server note:", data.note);
+    }
+    
     return data.conversationId;
   };
-  
+
   const uploadAudio = async (conversationId: string, audioUri: string): Promise<void> => {
-    if (!token) {
-      console.error("Auth token is missing for upload");
-      throw new Error("Authentication required");
-    }
-    
+    const token = await getFreshToken();
     const formData = new FormData();
     const fileName = audioUri.split("/").pop() || "audio.webm";
-    
-    // Determine the correct MIME type based on file extension
-    let mimeType = "audio/webm"; // Default
-    if (fileName.endsWith('.m4a')) {
-      mimeType = "audio/x-m4a";
-    } else if (fileName.endsWith('.wav')) {
-      mimeType = "audio/wav";
-    }
-    
-    formData.append("audio", {
-      uri: audioUri,
-      name: fileName,
-      type: mimeType,
-    } as any);
+    let mimeType = "audio/webm";
+    if (fileName.endsWith('.m4a')) mimeType = "audio/x-m4a";
+    else if (fileName.endsWith('.wav')) mimeType = "audio/wav";
+    formData.append("audio", { uri: audioUri, name: fileName, type: mimeType } as any);
     formData.append("conversationId", conversationId);
 
     const response = await fetch(`${API_BASE_URL}/audio`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
       body: formData,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Audio upload failed with status ${response.status}: ${errorText}`);
-      throw new Error(errorText || "Failed to upload audio");
-    }
+    if (!response.ok) throw new Error(await response.text() || "Failed to upload audio");
   };
-  
+
   const getConversationStatus = async (conversationId: string) => {
-    if (!token) throw new Error("Authentication required");
-    
+    const token = await getFreshToken();
     const response = await fetch(`${API_BASE_URL}/conversations/${conversationId}`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Failed to get conversation status");
     return data;
   };
+  
   
   const parseGptResponse = (gptResponse: string): AnalysisResponse => {
     const lines = gptResponse.split("\n").filter(line => line.trim());
@@ -174,7 +156,8 @@ export function useApi() {
   
   const processFirstRecording = async (audioUri: string, mode: string) => {
     try {
-      const convId = await createConversation(mode, "separate");
+      const id = Crypto.randomUUID();
+      const convId = await createConversation(id, mode, "separate");
       await uploadAudio(convId, audioUri);
       return { success: true, id: convId };
     } catch (error) {
@@ -189,7 +172,8 @@ export function useApi() {
     mode: string
   ) => {
     try {
-      const conversationId = await createConversation(mode, "separate");
+      const id = Crypto.randomUUID();
+      const conversationId = await createConversation(id, mode, "separate");
       await uploadAudio(conversationId, partner1Uri);
       await uploadAudio(conversationId, partner2Uri);
       const result = await pollForResult(conversationId, updateProgress);
@@ -205,7 +189,8 @@ export function useApi() {
     mode: string
   ) => {
     try {
-      const conversationId = await createConversation(mode, "live");
+      const id = Crypto.randomUUID();
+      const conversationId = await createConversation(id, mode, "live");
       await uploadAudio(conversationId, audioUri);
       const result = await pollForResult(conversationId, updateProgress);
       return { success: true, data: result };
@@ -223,7 +208,6 @@ export function useApi() {
     processSeparateRecordings,
     processLiveRecording,
     parseGptResponse,
-    pollForResult,
-    Token
+    pollForResult
   };
 }
