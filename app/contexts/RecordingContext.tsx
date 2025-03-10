@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
-import { AnalysisResponse } from '../utils/apiService';
+import { AnalysisResponse } from '../hooks/useAPI';
 
 interface RecordingData {
   partner1: string;

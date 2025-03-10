@@ -57,11 +57,14 @@ export default function ModePage() {
           selectedMode={selectedMode}
           onGoBack={handleGoBack}
           onRecordingComplete={handleRecordingComplete}
+          onNewRecording={() => setScreen('recording')}
         />
       )}
       {screen === 'results' && (
         <ResultsScreen
+          selectedMode={selectedMode}
           onGoBack={handleGoBack}
+          onRecordingComplete={handleRecordingComplete}
           onNewRecording={() => setScreen('recording')}
         />
       )}

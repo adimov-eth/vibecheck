@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, ReactNode } from 'react';
-import { useAuthTokenManager } from '../utils/auth';
+import { useAuthToken } from '../hooks/useAuthToken';
 
 // Create the context
 const AuthTokenContext = createContext<{ tokenInitialized: boolean }>({
@@ -8,14 +8,14 @@ const AuthTokenContext = createContext<{ tokenInitialized: boolean }>({
 
 // Context provider component
 export function AuthTokenProvider({ children }: { children: ReactNode }) {
-  const { refreshToken } = useAuthTokenManager();
+  const { getFreshToken } = useAuthToken();
   const [tokenInitialized, setTokenInitialized] = React.useState(false);
 
   // Initialize the token when the provider mounts
   useEffect(() => {
     const initToken = async () => {
       try {
-        await refreshToken();
+        await getFreshToken();
         setTokenInitialized(true);
       } catch (error) {
         console.error('Failed to initialize token:', error);
@@ -26,16 +26,10 @@ export function AuthTokenProvider({ children }: { children: ReactNode }) {
 
     initToken();
     
-    // Set up token refresh interval (every 30 minutes)
-    const refreshInterval = setInterval(async () => {
-      try {
-        await refreshToken();
-      } catch (error) {
-        console.error('Failed to refresh token:', error);
-      }
-    }, 30 * 60 * 1000);
+    // Token refreshing is handled internally by useAuthToken hook
+    // No need for additional refresh logic here
 
-    return () => clearInterval(refreshInterval);
+    return () => {};
   }, []);
 
   return (

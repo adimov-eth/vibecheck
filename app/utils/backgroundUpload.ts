@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@clerk/clerk-expo';
 import * as FileSystem from "expo-file-system";
 
-const API_BASE_URL = "http://172.20.10.5:3000"; // Match the URL in apiService.ts
+const API_BASE_URL = "http://172.20.10.5:3000"; // API server URL
 
 const UPLOAD_TASK = 'upload-task';
 
