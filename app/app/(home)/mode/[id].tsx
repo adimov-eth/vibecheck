@@ -40,7 +40,11 @@ export default function ModePage() {
   };
 
   const handleRecordingComplete = () => {
+    console.log('Mode page: handleRecordingComplete called');
     setIsProcessing(true);
+    
+    // Change screen immediately since we want to show the processing UI right away
+    console.log('Mode page: Changing screen to results');
     setScreen('results');
   };
 

@@ -1,5 +1,5 @@
 // useUpload.ts
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useApi } from '../hooks/useAPI'; // Updated import path
 import { showToast } from '../components/Toast'; // Assume this is a toast notification utility
 import { addToUploadQueue } from '../utils/backgroundUpload'; // Assume this handles upload queuing
@@ -37,7 +37,7 @@ const uploadAudio = useCallback(async (conversationId: string, uris: string | st
     setIsUploading(false);
     return false;
   }
-}, [addToUploadQueue]);
+}, []);
 
 const pollForStatus = useCallback((conversationId: string, onComplete: () => void) => {
     setIsPolling(true);

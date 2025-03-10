@@ -1,5 +1,5 @@
 // utils/useApi.ts
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useAuthToken } from './useAuthToken';
 
 const API_BASE_URL = 'http://192.168.1.66:3000'; // Replace with your server URL
@@ -83,30 +83,100 @@ export function useApi(): ApiHook {
     };
   }, []);
 
+  // Maintain a global mapping of conversation IDs to progress values
+  const progressMap = useRef<Map<string, number>>(new Map());
+  
   const pollForResult = useCallback(async (conversationId: string, updateProgress: (progress: number) => void) => {
-    const pollInterval = setInterval(() => updateProgress(Math.min(75, Date.now() % 100)), 1000);
+    console.log(`Starting to poll for results, conversationId: ${conversationId}`);
+    
+    // Get the current progress for this conversation, or initialize it
+    let artificialProgress = progressMap.current.get(conversationId) || 5;
+    
+    // Initialize with 5% if this is the first time
+    if (artificialProgress <= 0) {
+      artificialProgress = 5;
+      updateProgress(5);
+    } else {
+      // Use the existing progress if it's higher than 5%
+      updateProgress(artificialProgress);
+    }
+    
+    progressMap.current.set(conversationId, artificialProgress);
+    
+    // Use a smaller step for smoother progress
+    const progressStep = 1;
+    
+    // A slower interval means smoother progress updates
+    const pollInterval = setInterval(() => {
+      // Get current progress from the map
+      let currentProgress = progressMap.current.get(conversationId) || artificialProgress;
+      currentProgress = Math.min(currentProgress + progressStep, 80);
+      
+      // Update both the map and the UI
+      progressMap.current.set(conversationId, currentProgress);
+      updateProgress(currentProgress);
+      
+      // Update our local variable too
+      artificialProgress = currentProgress;
+    }, 4000);
+    
     const MAX_POLL_RETRIES = 30;
     const BASE_POLLING_INTERVAL = 2000;
+    
+    let consecutiveErrorCount = 0;
+    const MAX_CONSECUTIVE_ERRORS = 3;
 
     for (let retryCount = 0; retryCount < MAX_POLL_RETRIES; retryCount++) {
       try {
+        console.log(`Polling attempt ${retryCount + 1}/${MAX_POLL_RETRIES} for conversation ${conversationId}`);
         const { status, gptResponse } = await getConversationStatus(conversationId);
+        
+        // Reset error counter on successful request
+        consecutiveErrorCount = 0;
+        
         if (status === 'completed' && gptResponse) {
+          console.log(`Conversation ${conversationId} completed with response`);
           clearInterval(pollInterval);
           updateProgress(100);
           return parseGptResponse(gptResponse);
         }
+        
         if (status === 'failed') {
+          console.log(`Conversation ${conversationId} failed`);
           clearInterval(pollInterval);
           throw new Error('Conversation processing failed');
         }
+        
+        // Status-based progress updates only considered for smooth progression
+        // Instead of jumping to 50%, gradually increase to that point
+        if (status === 'processing' && artificialProgress < 50) {
+          // Move more quickly toward 50% but don't jump
+          artificialProgress = Math.min(artificialProgress + 10, 49);
+          updateProgress(artificialProgress);
+        } else if (status === 'transcribed' && artificialProgress < 70) {
+          // Move more quickly toward 70% but don't jump
+          artificialProgress = Math.min(artificialProgress + 15, 69);
+          updateProgress(artificialProgress);
+        }
+        
         await new Promise(resolve => setTimeout(resolve, BASE_POLLING_INTERVAL));
       } catch (error) {
         console.error(`Polling error (attempt ${retryCount + 1}/${MAX_POLL_RETRIES}):`, error);
+        
+        consecutiveErrorCount++;
+        if (consecutiveErrorCount >= MAX_CONSECUTIVE_ERRORS) {
+          console.log(`Too many consecutive errors (${consecutiveErrorCount}), aborting polling`);
+          clearInterval(pollInterval);
+          throw new Error('Too many consecutive errors');
+        }
+        
         if (retryCount === MAX_POLL_RETRIES - 1) {
           clearInterval(pollInterval);
           throw new Error('Max polling attempts reached');
         }
+        
+        // Backoff on errors
+        await new Promise(resolve => setTimeout(resolve, BASE_POLLING_INTERVAL * 2));
       }
     }
 

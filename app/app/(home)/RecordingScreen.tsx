@@ -1,5 +1,5 @@
 // RecordingScreen.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Dimensions, ActivityIndicator } from 'react-native';
 import { colors, spacing, typography, layout } from '../styles';
 import ModeCard from '../../components/ModeCard';
@@ -39,16 +39,22 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
   const [partner1Uri, setPartner1Uri] = useState<string | null>(null);
   const [partner2Uri, setPartner2Uri] = useState<string | null>(null);
   const [uploadsComplete, setUploadsComplete] = useState(false);
+  const [processingComplete, setProcessingComplete] = useState(false);
 
   const { setConversationId, clearRecordings, setRecordingData } = useRecording();
-  const { isRecording, recordingStatus, startRecording, stopRecording }: AudioRecordingHook = useAudioRecording();
+  const { isRecording, recordingStatus, startRecording, stopRecording, releaseRecordings }: AudioRecordingHook = useAudioRecording();
   const { uploadAudio, pollForStatus, isUploading }: UploadHook = useUpload();
   const { createConversation, getConversationStatus, pollForResult }: ApiHook = useApi();
 
   useEffect(() => {
+    // Only clear the recordings data, but keep the conversation ID for screen transitions
     clearRecordings();
-    return () => setConversationId(null);
-  }, [clearRecordings, setConversationId]);
+    
+    // Only clear the conversation ID when unmounting if we're not transitioning to results
+    return () => {
+      // We'll handle conversation ID clearing explicitly in other places
+    };
+  }, [clearRecordings]);
 
   const handleToggleRecording = async () => {
     if (isRecording) {
@@ -61,14 +67,31 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
         if (recordMode === 'separate') {
           setCurrentPartner(2);
         } else {
+          // In live mode, upload the single recording immediately
+          console.log(`Uploading single recording for live mode, uri: ${savedUri}`);
           const success = await uploadAudio(conversationId!, savedUri);
           if (success) setUploadsComplete(true);
         }
       } else if (partner1Uri) {
+        // Immediately navigate to the processing screen
+        setProcessingComplete(true);
+        // Schedule navigation soon after
+        onRecordingComplete();
+        
+        // Then continue with the processing in the background
         setPartner2Uri(savedUri);
+        // In separate mode with both recordings completed
         setRecordingData({ partner1: partner1Uri, partner2: savedUri });
-        const success = await uploadAudio(conversationId!, [partner1Uri, savedUri]);
-        if (success) setUploadsComplete(true);
+        console.log(`Uploading both recordings for separate mode, partner1: ${partner1Uri}, partner2: ${savedUri}`);
+        
+        // Upload one at a time to avoid potential race conditions
+        const success1 = await uploadAudio(conversationId!, partner1Uri);
+        const success2 = await uploadAudio(conversationId!, savedUri);
+        
+        if (success1 && success2) {
+          console.log("All uploads complete");
+          setUploadsComplete(true);
+        }
       }
       setIsProcessing(false);
     } else {
@@ -95,18 +118,58 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
 
   useEffect(() => {
     if (uploadsComplete && conversationId) {
+      console.log(`Starting to poll for status of conversation: ${conversationId}`);
       const stopPolling = pollForStatus(conversationId, () => {
-        setTimeout(onRecordingComplete, 1000);
+        // When polling is complete, this callback is invoked
+        console.log('Polling complete, processing complete');
+        setProcessingComplete(true);
+        
+        // Clean up recordings only after processing is complete
+        setTimeout(() => {
+          releaseRecordings()
+            .then(() => {
+              console.log('All recordings released after processing');
+              
+              // Navigate to results screen only after cleanup
+              console.log('Navigating to results screen');
+              onRecordingComplete();
+            })
+            .catch(err => {
+              console.error('Error releasing recordings:', err);
+              // Still continue to results even on cleanup error
+              console.log('Error during cleanup, still navigating to results');
+              onRecordingComplete();
+            });
+        }, 500); // Small delay before cleanup
       });
+      
+      // Return the stop polling function for cleanup
       return stopPolling;
     }
-  }, [uploadsComplete, conversationId, pollForStatus, onRecordingComplete]);
+  }, [uploadsComplete, conversationId, pollForStatus, onRecordingComplete, releaseRecordings]);
+  
+  // Ensure all recordings are released when component unmounts
+  useEffect(() => {
+    return () => {
+      releaseRecordings().catch(err => {
+        console.error('Error releasing recordings on unmount:', err);
+      });
+    };
+  }, [releaseRecordings]);
 
   const handleToggleMode = (index: number) => {
     setRecordMode(index === 0 ? 'separate' : 'live');
   };
 
   const renderRecordingStatus = () => {
+    if (processingComplete) {
+      return (
+        <View style={styles.processingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.recordingStatus}>Finalizing results...</Text>
+        </View>
+      );
+    }
     if (isUploading) {
       return (
         <View style={styles.processingContainer}>
@@ -186,12 +249,12 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
                 isRecording={isRecording}
                 onPress={handleToggleRecording}
                 size={Math.min(90, width * 0.22)}
-                disabled={isProcessing || isUploading}
+                disabled={isProcessing || isUploading || processingComplete}
               />
               <Text style={styles.recordingInstructions}>
                 {isRecording 
                   ? 'Recording... Tap to stop' 
-                  : isProcessing || isUploading
+                  : isProcessing || isUploading || processingComplete
                     ? 'Processing...'
                     : 'Tap to start recording'}
               </Text>
