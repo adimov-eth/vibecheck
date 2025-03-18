@@ -5,10 +5,9 @@
 The VibeCheck application implements a comprehensive authentication system with:
 
 1. Email/password authentication
-2. Biometric authentication (Face ID/Touch ID)
-3. Secure token management
-4. Offline authentication support
-5. Password reset flow
+2. Secure token management
+3. Offline authentication support
+4. Password reset flow
 
 This document explains the architecture, key components, and flows of the authentication system.
 
@@ -67,43 +66,25 @@ This document explains the architecture, key components, and flows of the authen
 │  Sign In Screen │──1──▶│  Email/Password │──2──▶│  Clerk Auth     │
 │                 │      │  Authentication │      │                 │
 └─────────────────┘      └─────────────────┘      └─────────────────┘
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  ▼
-        │                                         ┌─────────────────┐
-        │                                         │                 │
-        │                                         │  Active Session │
-        │                                         │                 │
-        │                                         └─────────────────┘
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  │
-        │                                                  ▼
-        │                                         ┌─────────────────┐
-        │                                         │                 │
-        │                                         │  Redirect to    │
-        │                                         │  Home Screen    │
-        │                                         │                 │
-        │                                         └─────────────────┘
-        │
-        │
-        ▼
-┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│                 │      │                 │      │                 │
-│  Biometric      │──3──▶│  Local          │──4──▶│  Clerk Auth     │
-│  Authentication │      │  Credentials    │      │                 │
-│                 │      │                 │      │                 │
-└─────────────────┘      └─────────────────┘      └─────────────────┘
+                                                          │
+                                                          │
+                                                          │
+                                                          ▼
+                                                 ┌─────────────────┐
+                                                 │                 │
+                                                 │  Active Session │
+                                                 │                 │
+                                                 └─────────────────┘
+                                                          │
+                                                          │
+                                                          │
+                                                          ▼
+                                                 ┌─────────────────┐
+                                                 │                 │
+                                                 │  Redirect to    │
+                                                 │  Home Screen    │
+                                                 │                 │
+                                                 └─────────────────┘
 ```
 
 ### 2. Password Reset Flow
@@ -222,7 +203,6 @@ When the device is offline:
 ### Key Components:
 
 - **useAuthToken**: Core hook for token management
-- **useBiometrics**: Hook for Face ID/Touch ID integration
 - **FormField/PasswordInput**: Reusable form components with validation
 - **Network Utilities**: Network status monitoring and caching
 - **Validation Utilities**: Input validation with consistent messaging
@@ -231,7 +211,6 @@ When the device is offline:
 ### Security Considerations:
 
 - Tokens are securely stored in AsyncStorage
-- Biometric credentials are protected by platform secure storage
 - Sensitive errors are filtered to avoid information leakage
 - Network status is verified before authentication operations
 

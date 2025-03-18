@@ -1,3 +1,5 @@
+import React from 'react'
+
 /**
  * Sign Up Screen
  * Handles user registration and email verification

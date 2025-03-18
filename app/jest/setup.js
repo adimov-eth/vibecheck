@@ -43,8 +43,6 @@ jest.mock('@clerk/clerk-expo/local-credentials', () => ({
     hasCredentials: true,
     setCredentials: jest.fn(),
     authenticate: jest.fn(),
-    biometricType: 'fingerprint',
-    clearCredentials: jest.fn(),
   })),
 }));
 

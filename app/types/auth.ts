@@ -65,28 +65,6 @@ export interface AuthTokenHook {
 }
 
 /**
- * Biometric authentication hook interface
- */
-export interface BiometricHook {
-  /** Whether biometric authentication is available */
-  isBiometricsAvailable: boolean;
-  /** Type of biometric authentication available */
-  biometricType: string | null;
-  /** Whether biometric operations are in progress */
-  isLoading: boolean;
-  /** Last error that occurred during biometric operations */
-  lastError?: string;
-  /** Prompt user for biometric authentication */
-  authenticateWithBiometrics: () => Promise<BiometricResult>;
-  /** Save credentials for future biometric authentication */
-  saveCredentials: (identifier: string, password: string) => Promise<boolean>;
-  /** Remove stored biometric credentials */
-  removeCredentials: () => Promise<boolean>;
-  /** Get friendly name for the biometric type */
-  getBiometricDisplayName: () => string;
-}
-
-/**
  * Password update form state
  */
 export interface PasswordUpdateState {
@@ -193,16 +171,4 @@ export class AuthError extends Error {
     this.name = 'AuthError';
     this.code = code;
   }
-}
-
-/**
- * Biometric authentication result interface
- */
-export interface BiometricResult {
-  /** Whether the authentication was successful */
-  success: boolean;
-  /** Error message if authentication failed */
-  errorMessage?: string;
-  /** Whether a fallback to password is recommended */
-  shouldFallback: boolean;
 }

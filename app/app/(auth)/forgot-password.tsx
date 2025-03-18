@@ -1,3 +1,5 @@
+import React from 'react'
+
 /**
  * Forgot Password Screen
  * Handles password reset flow including email verification and new password creation

@@ -1,11 +1,11 @@
 /**
  * Sign In Screen
- * Handles user authentication with email/password and biometrics
+ * Handles user authentication with email/password
  */
 import { useState, useCallback } from 'react'
 import { useSignIn } from '@clerk/clerk-expo'
 import { Link, useRouter } from 'expo-router'
-import { Text, View, StyleSheet, Alert } from 'react-native'
+import { Text, View, StyleSheet } from 'react-native'
 import Button from '../../components/Button'
 import { colors, typography, spacing } from '../styles'
 import { SignInState } from '../../types/auth'
@@ -13,23 +13,15 @@ import { FormField } from '../../components/auth/FormField'
 import { PasswordInput } from '../../components/auth/PasswordInput'
 import { ErrorMessage } from '../../components/auth/ErrorMessage'
 import { validateEmail } from '../../utils/validation'
-import { useBiometrics } from '../../hooks/useBiometrics'
 
 /**
  * Sign In Page Component
- * Provides email/password and biometric authentication
+ * Provides email/password authentication
  * @returns JSX Element for sign in screen
  */
 export default function Page(): JSX.Element {
   const router = useRouter()
   const { signIn, setActive, isLoaded } = useSignIn()
-  const { 
-    isBiometricsAvailable,
-    isLoading: isBiometricsLoading,
-    authenticateWithBiometrics,
-    saveCredentials,
-    getBiometricDisplayName
-  } = useBiometrics()
 
   // Form state management using our SignInState interface
   const [formState, setFormState] = useState<SignInState>({
@@ -41,9 +33,6 @@ export default function Page(): JSX.Element {
   
   // Destructure form state for easier access
   const { emailAddress, password, isLoading, error } = formState
-  
-  // Combined loading state for both form and biometrics
-  const isProcessing = isLoading || isBiometricsLoading
   
   // Update form field helper
   const updateFormField = (field: keyof SignInState, value: string): void => {
@@ -73,13 +62,6 @@ export default function Page(): JSX.Element {
 
       // Handle successful authentication
       if (signInAttempt.status === 'complete') {
-        // Store credentials for biometric login
-        const credentialsSaved = await saveCredentials(emailAddress, password)
-        if (!credentialsSaved) {
-          console.warn('Failed to save credentials for biometric login')
-          // Don't block the login flow for credential saving failures
-        }
-        
         // Set active session and navigate to home
         await setActive({ session: signInAttempt.createdSessionId })
         router.replace('/')
@@ -102,49 +84,6 @@ export default function Page(): JSX.Element {
     } finally {
       // Reset loading state
       setFormState(prev => ({ ...prev, isLoading: false }))
-    }
-  }
-  
-  /**
-   * Handle sign in with biometrics
-   */
-  const onBiometricSignInPress = async (): Promise<void> => {
-    if (!isLoaded || !isBiometricsAvailable) return
-    
-    try {
-      // Attempt biometric authentication with enhanced error handling
-      const result = await authenticateWithBiometrics()
-      
-      if (result.success) {
-        // No need to set active session or navigate - the hook handles it
-        router.replace('/')
-      } else if (result.errorMessage && result.shouldFallback) {
-        // Show error and suggest fallback to password
-        Alert.alert(
-          'Biometric Authentication Failed',
-          `${result.errorMessage}\n\nWould you like to use password login instead?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Use Password', 
-              onPress: () => {
-                // Just clear the error, let user use the form
-                setFormState(prev => ({ ...prev, error: '' }))
-              }
-            }
-          ]
-        )
-      } else if (result.errorMessage) {
-        // Just show error in form
-        setFormState(prev => ({ ...prev, error: result.errorMessage || 'Authentication failed' }))
-      }
-    } catch (err) {
-      // Handle unexpected errors
-      const errorMessage = err instanceof Error 
-        ? err.message 
-        : 'An unexpected error occurred. Please try again.'
-      
-      setFormState(prev => ({ ...prev, error: errorMessage }))
     }
   }
 
@@ -205,21 +144,9 @@ export default function Page(): JSX.Element {
         title="Sign In" 
         onPress={() => validateInput() && onSignInPress()} 
         variant="primary" 
-        loading={isProcessing}
-        disabled={isProcessing || !emailAddress || !password}
+        loading={isLoading}
+        disabled={isLoading || !emailAddress || !password}
       />
-      
-      {/* Biometric authentication button */}
-      {isBiometricsAvailable && (
-        <Button
-          title={`Sign in with ${getBiometricDisplayName()}`}
-          onPress={onBiometricSignInPress}
-          variant="secondary"
-          loading={isProcessing}
-          disabled={isProcessing}
-          style={styles.biometricButton}
-        />
-      )}
       
       {/* Sign up link */}
       <View style={styles.linkContainer}>
@@ -235,8 +162,8 @@ export default function Page(): JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: spacing.xl, // 20
-    backgroundColor: colors.background, // #FCFDFE
+    padding: spacing.xl,
+    backgroundColor: colors.background,
   },
   title: {
     ...typography.heading1,
@@ -261,9 +188,6 @@ const styles = StyleSheet.create({
   forgotPasswordText: {
     ...typography.body2,
     color: colors.primary,
-  },
-  biometricButton: {
-    marginTop: spacing.md,
   },
   linkContainer: {
     flexDirection: 'row',

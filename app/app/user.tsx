@@ -34,9 +34,7 @@ export default function Page() {
     setIsLoading(true)
     try {
       await clearCredentials()
-      Alert.alert('Success', 'Biometric credentials removed successfully.')
     } catch (error) {
-      Alert.alert('Error', 'Failed to remove biometric credentials. Please try again.')
       console.error(error)
     } finally {
       setIsLoading(false)
@@ -93,17 +91,6 @@ export default function Page() {
               icon={<Ionicons name="log-out-outline" size={20} color={colors.white} />}
               style={styles.button}
             />
-            
-            {userOwnsCredentials && (
-              <Button 
-                title="Remove Biometric Login" 
-                onPress={handleClearCredentials}
-                variant="outline"
-                loading={isLoading}
-                icon={<Ionicons name="finger-print-outline" size={20} color={colors.primary} />}
-                style={styles.button}
-              />
-            )}
           </View>
         </View>
 

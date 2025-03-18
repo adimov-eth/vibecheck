@@ -27,7 +27,7 @@ export default function RootLayout() {
                 headerShown: false, // Hide all headers by default
                 animation: 'slide_from_right' 
               }}>
-                <Stack.Screen name="(auth)" />
+                <Stack.Screen name="(auth)" options={{ headerShown: false }}/>
                 <Stack.Screen name="(home)" />
                 <Stack.Screen name="index" options={{ headerShown: false }} />
               </Stack>
