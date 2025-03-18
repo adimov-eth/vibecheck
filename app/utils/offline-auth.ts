@@ -3,25 +3,13 @@
  * Manages authentication operations when device is offline
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
+import { NetInfoState } from '@react-native-community/netinfo';
 import { TokenStatus, TokenMetadata } from '../types/auth';
 import { logError } from './error-logger';
+import { isOnline, setupNetworkListeners as setupBaseNetworkListeners, NetworkStatusData } from './network';
 
 // Constants
 const OFFLINE_AUTH_KEY = 'offline_auth_operations';
-const NETWORK_STATUS_KEY = 'network_status';
-
-/**
- * Network status with last check timestamp
- */
-interface NetworkStatusData {
-  /** Whether device is connected to network */
-  isConnected: boolean;
-  /** Last time network status was checked */
-  lastChecked: number;
-  /** Whether device has internet access */
-  hasInternet: boolean;
-}
 
 /**
  * Offline operation type
@@ -42,46 +30,6 @@ interface PendingOperation {
   data?: Record<string, unknown>;
   /** Number of retry attempts */
   retryCount: number;
-}
-
-/**
- * Check if the device is currently online
- * @param forceCheck Whether to force a new check vs using cached status
- * @returns Promise resolving to online status
- */
-export async function isOnline(forceCheck = false): Promise<boolean> {
-  try {
-    // Check if we have a recent status check (within last minute)
-    if (!forceCheck) {
-      const cachedStatusJson = await AsyncStorage.getItem(NETWORK_STATUS_KEY);
-      if (cachedStatusJson) {
-        const cachedStatus = JSON.parse(cachedStatusJson) as NetworkStatusData;
-        const isCacheValid = Date.now() - cachedStatus.lastChecked < 60000; // 1 minute
-        
-        if (isCacheValid) {
-          return cachedStatus.hasInternet;
-        }
-      }
-    }
-    
-    // Perform a fresh network check
-    const networkState = await NetInfo.fetch();
-    const status: NetworkStatusData = {
-      isConnected: Boolean(networkState.isConnected),
-      hasInternet: Boolean(networkState.isInternetReachable),
-      lastChecked: Date.now()
-    };
-    
-    // Cache the result
-    await AsyncStorage.setItem(NETWORK_STATUS_KEY, JSON.stringify(status));
-    
-    return status.hasInternet;
-  } catch (error) {
-    logError(error, 'isOnline', { forceCheck });
-    // Default to online in case of error checking status
-    // This prevents blocking operations unnecessarily
-    return true;
-  }
 }
 
 /**
@@ -235,27 +183,13 @@ export async function checkOfflineTokenValidity(
 export function setupNetworkListeners(
   processQueue: () => Promise<void>
 ): () => void {
-  // Subscribe to network state changes
-  const unsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
+  // Subscribe to network state changes using the shared implementation
+  return setupBaseNetworkListeners((state: NetInfoState) => {
     // When device comes online, process queued operations
     if (state.isConnected && state.isInternetReachable) {
       processQueue().catch(error => {
         logError(error, 'processQueue');
       });
-      
-      // Update cached network status
-      const status: NetworkStatusData = {
-        isConnected: Boolean(state.isConnected),
-        hasInternet: Boolean(state.isInternetReachable),
-        lastChecked: Date.now()
-      };
-      
-      AsyncStorage.setItem(NETWORK_STATUS_KEY, JSON.stringify(status))
-        .catch(error => {
-          logError(error, 'updateNetworkStatus');
-        });
     }
   });
-  
-  return unsubscribe;
 }

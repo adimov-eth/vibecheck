@@ -22,6 +22,18 @@ interface PasswordInputProps {
   inputStyle?: object;
   /** Optional testID for testing */
   testID?: string;
+  /** Error message to display (if any) */
+  error?: string;
+  /** Accessibility label */
+  accessibilityLabel?: string;
+  /** Callback for when the input is focused */
+  onFocus?: () => void;
+  /** Callback for when the input loses focus */
+  onBlur?: () => void;
+  /** Validation function to run on blur */
+  onValidate?: (value: string) => string | null;
+  /** Whether to auto-validate as the user types */
+  validateOnChange?: boolean;
 }
 
 /**
@@ -37,36 +49,113 @@ export function PasswordInput({
   containerStyle,
   inputStyle,
   testID,
+  error,
+  accessibilityLabel,
+  onFocus,
+  onBlur,
+  onValidate,
+  validateOnChange = false,
 }: PasswordInputProps): JSX.Element {
   // Track password visibility state
   const [isVisible, setIsVisible] = useState<boolean>(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [isFocused, setIsFocused] = useState<boolean>(false);
+  
+  // Combine external and local errors
+  const displayError = error || localError;
+  
+  // Generate unique ID for accessibility
+  const inputId = `password-input-${Math.random().toString(36).substring(2, 9)}`;
   
   // Toggle password visibility
   const toggleVisibility = (): void => setIsVisible(prev => !prev);
   
+  // Handle text changes with validation
+  const handleTextChange = (text: string) => {
+    onChangeText(text);
+    
+    // Clear local error when user types
+    if (localError) {
+      setLocalError(null);
+    }
+    
+    // Validate as user types if enabled
+    if (validateOnChange && onValidate && text.length > 0) {
+      const validationError = onValidate(text);
+      if (validationError) {
+        setLocalError(validationError);
+      }
+    }
+  };
+  
+  // Handle focus
+  const handleFocus = () => {
+    setIsFocused(true);
+    if (onFocus) {
+      onFocus();
+    }
+  };
+  
+  // Handle blur with validation
+  const handleBlur = () => {
+    setIsFocused(false);
+    
+    // Run validation on blur
+    if (onValidate && value.length > 0) {
+      const validationError = onValidate(value);
+      setLocalError(validationError);
+    }
+    
+    if (onBlur) {
+      onBlur();
+    }
+  };
+  
   return (
     <View style={[styles.container, containerStyle]}>
       <TextInput
-        style={[styles.input, inputStyle]}
+        style={[
+          styles.input, 
+          displayError ? styles.inputError : null,
+          isFocused && styles.inputFocused,
+          !editable ? styles.inputDisabled : null,
+          inputStyle
+        ]}
         value={value}
-        onChangeText={onChangeText}
+        onChangeText={handleTextChange}
         placeholder={placeholder}
+        placeholderTextColor={colors.lightText}
         secureTextEntry={!isVisible}
         autoCapitalize="none"
         editable={editable}
         testID={testID}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        nativeID={inputId}
+        accessibilityLabel={accessibilityLabel || placeholder}
+        accessibilityHint="Password field with visibility toggle"
+        accessibilityState={{ 
+          disabled: !editable,
+          invalid: Boolean(displayError)
+        }}
+        importantForAccessibility="yes"
       />
       <TouchableOpacity 
         onPress={toggleVisibility}
         style={styles.iconButton}
         accessibilityLabel={isVisible ? "Hide password" : "Show password"}
         accessibilityRole="button"
+        accessibilityHint={isVisible ? "Hide password text" : "Show password text"}
+        accessibilityState={{ disabled: !editable }}
         disabled={!editable}
+        importantForAccessibility="yes"
       >
         <Ionicons 
           name={isVisible ? "eye-off-outline" : "eye-outline"} 
           size={20} 
           color={editable ? colors.mediumText : colors.lightText} 
+          accessibilityElementsHidden={true}
+          importantForAccessibility="no"
         />
       </TouchableOpacity>
     </View>
@@ -88,6 +177,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: spacing.md,
     paddingRight: spacing.xl + spacing.md, // Extra space for the icon
+  },
+  inputError: {
+    borderColor: colors.error || '#FF3B30',
+  },
+  inputFocused: {
+    borderColor: colors.primary,
+    borderWidth: 2,
+  },
+  inputDisabled: {
+    backgroundColor: '#F8F8F8',
+    color: colors.mediumText,
   },
   iconButton: {
     position: 'absolute',

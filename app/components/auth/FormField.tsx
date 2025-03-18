@@ -2,8 +2,8 @@
  * Form Field Component
  * A reusable component for form fields with label and validation
  */
-import React from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TextInput, StyleSheet, AccessibilityInfo } from 'react-native';
 import { colors, typography, spacing } from '../../app/styles';
 
 interface FormFieldProps {
@@ -41,6 +41,12 @@ interface FormFieldProps {
   onBlur?: () => void;
   /** Optional testID for testing */
   testID?: string;
+  /** Validation function to run on blur */
+  onValidate?: (value: string) => string | null;
+  /** ID for accessibility purposes */
+  accessibilityLabel?: string;
+  /** Whether to auto-validate as the user types */
+  validateOnChange?: boolean;
 }
 
 /**
@@ -66,23 +72,85 @@ export function FormField({
   onFocus,
   onBlur,
   testID,
+  onValidate,
+  accessibilityLabel,
+  validateOnChange = false,
 }: FormFieldProps): JSX.Element {
+  // Local state for inline validation
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [isFocused, setIsFocused] = useState<boolean>(false);
+  
+  // Combine external and local validation errors
+  const displayError = error || localError;
+  
+  // ID for linking label to input for accessibility
+  const inputId = `input-${label?.toLowerCase().replace(/\s+/g, '-') || Math.random().toString(36).substring(2, 9)}`;
+  
+  // Handle text changes with optional inline validation
+  const handleTextChange = (text: string) => {
+    onChangeText(text);
+    
+    // Clear local error when user types
+    if (localError) {
+      setLocalError(null);
+    }
+    
+    // Validate as user types if enabled and we have a validation function
+    if (validateOnChange && onValidate && text.length > 0) {
+      const validationError = onValidate(text);
+      if (validationError) {
+        setLocalError(validationError);
+      }
+    }
+  };
+  
+  // Handle blur with validation
+  const handleBlur = (e: any) => {
+    setIsFocused(false);
+    
+    // Run validation on blur if we have a validation function
+    if (onValidate && value.length > 0) {
+      const validationError = onValidate(value);
+      setLocalError(validationError);
+    }
+    
+    // Call external onBlur if provided
+    if (onBlur) {
+      onBlur();
+    }
+  };
+  
+  // Handle focus
+  const handleFocus = () => {
+    setIsFocused(true);
+    if (onFocus) {
+      onFocus();
+    }
+  };
+  
   return (
     <View style={[styles.container, containerStyle]}>
       {label && (
-        <Text style={styles.label}>{label}</Text>
+        <Text 
+          style={styles.label}
+          nativeID={`${inputId}-label`}
+          accessibilityRole="text"
+        >
+          {label}
+        </Text>
       )}
       
       <TextInput
         style={[
           styles.input,
           multiline && styles.multilineInput,
-          error ? styles.inputError : null,
+          displayError ? styles.inputError : null,
+          isFocused && styles.inputFocused,
           !editable ? styles.inputDisabled : null,
           inputStyle
         ]}
         value={value}
-        onChangeText={onChangeText}
+        onChangeText={handleTextChange}
         placeholder={placeholder}
         placeholderTextColor={colors.lightText}
         editable={editable}
@@ -91,15 +159,36 @@ export function FormField({
         autoCapitalize={autoCapitalize}
         multiline={multiline}
         numberOfLines={multiline ? numberOfLines : undefined}
-        onFocus={onFocus}
-        onBlur={onBlur}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         testID={testID}
+        accessibilityLabel={accessibilityLabel || label || placeholder}
+        accessibilityHint={helperText}
+        accessibilityState={{ 
+          disabled: !editable,
+          invalid: Boolean(displayError) 
+        }}
+        accessible={true}
+        accessibilityLabelledBy={label ? `${inputId}-label` : undefined}
+        nativeID={inputId}
+        accessibilityRole="text"
       />
       
-      {error ? (
-        <Text style={styles.errorText}>{error}</Text>
+      {displayError ? (
+        <Text 
+          style={styles.errorText}
+          accessibilityLiveRegion="polite"
+          accessibilityRole="alert"
+        >
+          {displayError}
+        </Text>
       ) : helperText ? (
-        <Text style={styles.helperText}>{helperText}</Text>
+        <Text 
+          style={styles.helperText}
+          accessibilityRole="text"
+        >
+          {helperText}
+        </Text>
       ) : null}
     </View>
   );
@@ -131,6 +220,10 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: colors.error || '#FF3B30',
+  },
+  inputFocused: {
+    borderColor: colors.primary,
+    borderWidth: 2,
   },
   inputDisabled: {
     backgroundColor: '#F8F8F8',

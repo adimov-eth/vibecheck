@@ -3,17 +3,12 @@
  * Provides request interceptors, header generators, and error handling
  */
 import { Alert } from 'react-native';
-import NetInfo from '@react-native-community/netinfo';
 import { TokenStatus, AuthError } from '../types/auth';
+import { checkNetworkStatus, NetworkStatus } from './network';
 
 // Constants
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://api.vibecheck.app';
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
-
-/**
- * Network status type for connection tracking
- */
-export type NetworkStatus = 'connected' | 'disconnected' | 'unknown';
 
 /**
  * API response structure
@@ -59,20 +54,6 @@ export interface RequestOptions extends RequestInit {
   customHeaders?: Record<string, string>;
   /** Whether to skip offline check */
   skipOfflineCheck?: boolean;
-}
-
-/**
- * Check if device is currently online
- * @returns Promise resolving to network status
- */
-export async function checkNetworkStatus(): Promise<NetworkStatus> {
-  try {
-    const state = await NetInfo.fetch();
-    return state.isConnected ? 'connected' : 'disconnected';
-  } catch (error) {
-    console.warn('Failed to check network status:', error);
-    return 'unknown';
-  }
 }
 
 /**
