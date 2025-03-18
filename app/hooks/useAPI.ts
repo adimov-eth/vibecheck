@@ -2,7 +2,7 @@
 import { useCallback, useRef } from 'react';
 import { useAuthToken } from './useAuthToken';
 
-const API_BASE_URL = 'http://192.168.1.66:3000'; // Replace with your server URL
+const API_BASE_URL = 'https://v.bkk.lol'; // Replace with your server URL
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 5000; // 5 seconds
 
@@ -149,11 +149,11 @@ export function useApi(): ApiHook {
         
         // Status-based progress updates only considered for smooth progression
         // Instead of jumping to 50%, gradually increase to that point
-        if (status === 'processing' && artificialProgress < 50) {
+        if ( status === 'pending' && artificialProgress < 50) {
           // Move more quickly toward 50% but don't jump
           artificialProgress = Math.min(artificialProgress + 10, 49);
           updateProgress(artificialProgress);
-        } else if (status === 'transcribed' && artificialProgress < 70) {
+        } else if (status === 'completed' && artificialProgress < 70) {
           // Move more quickly toward 70% but don't jump
           artificialProgress = Math.min(artificialProgress + 15, 69);
           updateProgress(artificialProgress);
