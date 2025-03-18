@@ -1,45 +1,82 @@
-import React, { createContext, useContext, useEffect, ReactNode } from 'react';
+/**
+ * Authentication Token Context
+ * Provides authentication token state and management throughout the app
+ */
+import React, { createContext, useContext, useEffect, ReactNode, useState } from 'react';
 import { useAuthToken } from '../hooks/useAuthToken';
+import { AuthTokenContextState } from '../types/auth';
 
-// Create the context
-const AuthTokenContext = createContext<{ tokenInitialized: boolean }>({
-  tokenInitialized: false
-});
+// Default context value
+const defaultContextValue: AuthTokenContextState = {
+  tokenInitialized: false,
+  errorMessage: undefined
+};
 
-// Context provider component
-export function AuthTokenProvider({ children }: { children: ReactNode }) {
-  const { getFreshToken } = useAuthToken();
-  const [tokenInitialized, setTokenInitialized] = React.useState(false);
+// Create the context with rich type information
+const AuthTokenContext = createContext<AuthTokenContextState>(defaultContextValue);
+
+/**
+ * Authentication Token Provider component
+ * Manages token initialization and state throughout the app
+ * @param children - React child components
+ */
+export function AuthTokenProvider({ children }: { children: ReactNode }): JSX.Element {
+  const { getFreshToken, isRefreshing, lastError, clearToken } = useAuthToken();
+  const [tokenState, setTokenState] = useState<AuthTokenContextState>(defaultContextValue);
 
   // Initialize the token when the provider mounts
   useEffect(() => {
-    const initToken = async () => {
+    const initToken = async (): Promise<void> => {
       try {
         await getFreshToken();
-        setTokenInitialized(true);
+        setTokenState({
+          tokenInitialized: true,
+          errorMessage: undefined
+        });
       } catch (error) {
-        console.error('Failed to initialize token:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Failed to initialize token';
+        console.error('Token initialization error:', error);
+        
         // We still mark as initialized even on error to prevent infinite retries
-        setTokenInitialized(true);
+        setTokenState({
+          tokenInitialized: true,
+          errorMessage
+        });
       }
     };
 
-    initToken();
+    // Only initialize if not already initialized
+    if (!tokenState.tokenInitialized) {
+      initToken();
+    }
     
     // Token refreshing is handled internally by useAuthToken hook
     // No need for additional refresh logic here
 
     return () => {};
-  }, []);
+  }, [getFreshToken, tokenState.tokenInitialized]);
+
+  // Update error state when lastError changes in the hook
+  useEffect(() => {
+    if (lastError && tokenState.errorMessage !== lastError.message) {
+      setTokenState(prev => ({
+        ...prev,
+        errorMessage: lastError.message
+      }));
+    }
+  }, [lastError, tokenState.errorMessage]);
 
   return (
-    <AuthTokenContext.Provider value={{ tokenInitialized }}>
+    <AuthTokenContext.Provider value={tokenState}>
       {children}
     </AuthTokenContext.Provider>
   );
 }
 
-// Custom hook to use the auth token context
-export function useAuthTokenContext() {
+/**
+ * Custom hook to use the auth token context
+ * @returns The current authentication token context state
+ */
+export function useAuthTokenContext(): AuthTokenContextState {
   return useContext(AuthTokenContext);
 } 
