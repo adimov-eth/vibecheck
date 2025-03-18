@@ -36,7 +36,7 @@ export async function checkNetworkStatus(): Promise<NetworkStatus> {
     const state = await NetInfo.fetch();
     return state.isConnected ? 'connected' : 'disconnected';
   } catch (error) {
-    console.warn('Failed to check network status:', error);
+    logError(error, 'checkNetworkStatus');
     return 'unknown';
   }
 }

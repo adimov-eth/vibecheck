@@ -135,8 +135,7 @@ export function PasswordInput({
         accessibilityLabel={accessibilityLabel || placeholder}
         accessibilityHint="Password field with visibility toggle"
         accessibilityState={{ 
-          disabled: !editable,
-          invalid: Boolean(displayError)
+          disabled: !editable
         }}
         importantForAccessibility="yes"
       />

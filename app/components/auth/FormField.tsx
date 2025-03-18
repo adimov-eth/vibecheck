@@ -165,8 +165,7 @@ export function FormField({
         accessibilityLabel={accessibilityLabel || label || placeholder}
         accessibilityHint={helperText}
         accessibilityState={{ 
-          disabled: !editable,
-          invalid: Boolean(displayError) 
+          disabled: !editable
         }}
         accessible={true}
         accessibilityLabelledBy={label ? `${inputId}-label` : undefined}
