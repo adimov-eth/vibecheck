@@ -30,8 +30,8 @@ export default function RootLayout() {
           <ClerkLoaded>
             <AuthTokenProvider>
               <UserProvider>
-                <SubscriptionProvider>
-                  <UsageProvider>
+                <UsageProvider>
+                  <SubscriptionProvider>
                     <Stack screenOptions={{ 
                       headerShown: false, // Hide all headers by default
                       animation: 'slide_from_right' 
@@ -41,8 +41,8 @@ export default function RootLayout() {
                       <Stack.Screen name="index" options={{ headerShown: false }} />
                     </Stack>
                     <ToastComponent />
-                  </UsageProvider>
-                </SubscriptionProvider>
+                  </SubscriptionProvider>
+                </UsageProvider>
               </UserProvider>
             </AuthTokenProvider>
           </ClerkLoaded>

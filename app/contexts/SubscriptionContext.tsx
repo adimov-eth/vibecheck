@@ -345,12 +345,12 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
       return;
     }
 
-    // Avoid checking too frequently - add debounce
+    // Larger delay to ensure token is fully ready and to avoid race conditions
     const checkTimeout = setTimeout(() => {
       checkSubscriptionStatus().catch(err => {
         console.error('Failed to check subscription status:', err);
       });
-    }, 1000); // 1 second delay to avoid rapid checks
+    }, 5000); // 5 second delay to avoid race conditions with token initialization
 
     return () => {
       clearTimeout(checkTimeout);

@@ -57,7 +57,8 @@ export function useApi(): ApiHook {
         throw new Error('Authentication failed: Invalid token');
       }
       
-      console.log(`API request to: ${url.split('/').slice(-2).join('/')}`);
+      const endpoint = url.split('/').slice(-2).join('/');
+      console.log(`API request to: ${endpoint}`);
       
       const response = await fetch(url, {
         ...options,
@@ -70,7 +71,7 @@ export function useApi(): ApiHook {
       
       if (response.status === 401 || response.status === 403) {
         // Specific authentication error handling
-        console.error(`Authentication error: ${response.status} on ${url.split('/').slice(-2).join('/')}`);
+        console.error(`Authentication error: ${response.status} on ${endpoint}`);
         throw new Error(`Authentication failed: ${response.statusText}`);
       }
       
@@ -89,9 +90,13 @@ export function useApi(): ApiHook {
         throw error;
       }
       
+      // For subscription status endpoint, use a longer delay between retries
+      const isSubscriptionEndpoint = url.includes('/subscriptions/status');
+      const delayTime = isSubscriptionEndpoint ? RETRY_DELAY * 2 : RETRY_DELAY;
+      
       if (retries < MAX_RETRIES) {
-        console.log(`Request failed, retrying (${retries + 1}/${MAX_RETRIES}) in ${RETRY_DELAY / 1000} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        console.log(`Request failed, retrying (${retries + 1}/${MAX_RETRIES}) in ${delayTime / 1000} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, delayTime));
         return fetchWithRetry(url, options, retries + 1);
       }
       
@@ -277,9 +282,20 @@ export function useApi(): ApiHook {
   // Get current subscription status
   const getSubscriptionStatus = useCallback(async (): Promise<SubscriptionStatus> => {
     try {
+      // Get a fresh token before making the subscription status request
+      // This helps ensure the token is valid before checking subscription
+      const token = await getFreshToken();
+      
+      if (!token) {
+        console.error('Failed to get valid token for subscription check');
+        throw new Error('Authentication failed: Invalid token');
+      }
+      
+      console.log('Checking subscription status with fresh token');
+      
       const response = await fetchWithRetry(`${API_BASE_URL}/subscriptions/status`, {
         method: 'GET',
-      });
+      }, 0); // Start with 0 retries to get a fresh attempt
       
       const result = await response.json();
       
@@ -300,7 +316,7 @@ export function useApi(): ApiHook {
         },
       };
     }
-  }, [fetchWithRetry]);
+  }, [fetchWithRetry, getFreshToken]);
 
   // Get user's usage statistics
   const getUserUsageStats = useCallback(async (): Promise<UsageStats> => {

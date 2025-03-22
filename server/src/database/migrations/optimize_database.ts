@@ -2,6 +2,16 @@ import { getDbConnection, closeDbConnections } from '../index';
 import { log } from '../../utils/logger.utils';
 import { Database } from 'bun:sqlite';
 
+// Define types for SQLite query results
+interface IntegrityCheckResult {
+  integrity_check: string;
+}
+
+interface PragmaResult {
+  page_size: number;
+  page_count: number;
+}
+
 /**
  * Applies performance optimizations to the SQLite database
  */
@@ -29,7 +39,7 @@ async function optimizeDatabase() {
     
     // Enable integrity checks
     log('Running integrity check...', 'info');
-    const integrityCheck = db.query('PRAGMA integrity_check;').all();
+    const integrityCheck = db.query('PRAGMA integrity_check;').all() as IntegrityCheckResult[];
     if (integrityCheck.length === 1 && integrityCheck[0].integrity_check === 'ok') {
       log('Database integrity verified', 'info');
     } else {
@@ -37,8 +47,8 @@ async function optimizeDatabase() {
     }
     
     // Report database size
-    const pageSize = db.query('PRAGMA page_size;').get().page_size;
-    const pageCount = db.query('PRAGMA page_count;').get().page_count;
+    const pageSize = (db.query('PRAGMA page_size;').get() as PragmaResult).page_size;
+    const pageCount = (db.query('PRAGMA page_count;').get() as PragmaResult).page_count;
     const databaseSizeBytes = pageSize * pageCount;
     const databaseSizeMB = (databaseSizeBytes / (1024 * 1024)).toFixed(2);
     
@@ -56,7 +66,8 @@ async function optimizeDatabase() {
     log(`Error during database optimization: ${error}`, 'error');
     throw error;
   } finally {
-    await closeDbConnections();
+    // Don't close connections here as it will close the default connection used by the application
+    // await closeDbConnections();
   }
 }
 

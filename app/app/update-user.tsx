@@ -9,7 +9,7 @@ import Button from '../components/Button'
 import { colors, typography, spacing, layout } from './styles'
 import { TextInput } from 'react-native'
 
-export default function Page() {
+function Page() {
   const { user } = useUser()
   const [currentPassword, setCurrentPassword] = useState('')
   const [password, setPassword] = useState('')
@@ -174,6 +174,8 @@ export default function Page() {
     </SafeAreaView>
   )
 }
+
+export default Page
 
 const styles = StyleSheet.create({
   safeArea: {
