@@ -31,4 +31,8 @@ export const config = {
     },
     message: 'Too many requests, please try again later',
   },
+  
+  // Database maintenance configuration
+  enableMaintenance: process.env.ENABLE_MAINTENANCE !== 'false',
+  maintenanceHour: Number(process.env.MAINTENANCE_HOUR) || 3, // 3 AM
 };

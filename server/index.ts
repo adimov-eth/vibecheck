@@ -3,6 +3,9 @@ import { config } from './src/config.js';
 import fs from 'fs/promises';
 import { logger } from './src/utils/logger.utils.js';
 import { websocketManager } from './src/utils/websocket.utils.js';
+import setupDatabase from './src/database/utils/setupDb.js';
+import { closeDbConnections } from './src/database/index.js';
+import initScheduledMaintenance from './src/utils/scheduled-maintenance.js';
 
 /**
  * Ensure required directories exist before starting the server
@@ -22,7 +25,7 @@ async function ensureDirectories() {
  * Graceful shutdown handler
  */
 function setupGracefulShutdown(server) {
-  const shutdown = () => {
+  const shutdown = async () => {
     logger.info('Shutdown signal received, closing server...');
     
     // Close the HTTP server
@@ -32,9 +35,15 @@ function setupGracefulShutdown(server) {
       // Shutdown WebSocket server if it's running
       websocketManager.shutdown();
       
-      // Exit process
-      logger.info('Server shutdown complete');
-      process.exit(0);
+      // Close database connections
+      closeDbConnections()
+        .then(() => logger.info('Database connections closed'))
+        .catch(err => logger.error('Error closing database connections:', err))
+        .finally(() => {
+          // Exit process
+          logger.info('Server shutdown complete');
+          process.exit(0);
+        });
     });
     
     // Force exit after timeout if graceful shutdown fails
@@ -59,6 +68,15 @@ async function main() {
     // Ensure required directories exist
     await ensureDirectories();
     
+    // Set up database and run migrations
+    logger.info('Setting up database...');
+    const dbSuccess = await setupDatabase();
+    if (!dbSuccess) {
+      logger.error('Database setup failed, aborting server start');
+      process.exit(1);
+    }
+    logger.info('Database setup completed successfully');
+    
     // Create and configure the app
     const server = createApp();
     const PORT = config.port;
@@ -67,6 +85,11 @@ async function main() {
     server.listen(PORT, () => {
       logger.info(`Server is running on port ${PORT}`);
       logger.info(`WebSocket ${config.webSocket.enabled ? 'enabled' : 'disabled'}`);
+      
+      // Initialize scheduled maintenance tasks
+      if (config.enableMaintenance !== false) {
+        initScheduledMaintenance();
+      }
     });
     
     // Setup graceful shutdown
