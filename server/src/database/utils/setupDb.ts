@@ -2,10 +2,15 @@ import { log } from '../../utils/logger.utils';
 import addIndexes from '../migrations/add_indexes';
 import optimizeDatabase from '../migrations/optimize_database';
 import testTransactions from './transactionTest';
+import { initializeDb } from '../index';
 
 async function setupDatabase() {
   try {
     log('Starting database setup...', 'info');
+    
+    // Initialize default database connection first
+    log('Initializing default database connection...', 'info');
+    await initializeDb();
     
     // Run migrations
     log('Running migrations...', 'info');
