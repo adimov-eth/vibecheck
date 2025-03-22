@@ -86,7 +86,7 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>(() => 
     globalWsInstance.instance ? 
-      (globalWsInstance.instance.readyState === WebSocket.OPEN ? 'connected' : 'connecting') : 
+      (globalWsInstance.instance.readyState === WebSocket.OPEN ? 'connected' : 'disconnected') : 
       'disconnected'
   );
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
@@ -108,10 +108,18 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
     return Math.floor(baseDelay * jitterFactor);
   }, []);
 
+  // Pre-declare functions to avoid circular dependencies
+  const handleIncomingMessage = useCallback((message: WebSocketMessage) => {}, []);
+  const storePendingMessage = useCallback(async (message: WebSocketMessage) => {}, []);
+  const sendPendingMessages = useCallback(async () => {}, []);
+  const scheduleReconnect = useCallback(() => {}, []);
+  const reconnect = useCallback(() => {}, []);
+  const initializeWebSocket = useCallback(async () => {}, []);
+
   /**
    * Initialize WebSocket connection with authentication
    */
-  const initializeWebSocket = useCallback(async () => {
+  const initializeWebSocketImpl = useCallback(async () => {
     // Clear any existing reconnect timeouts
     if (reconnectTimeout.current) {
       clearTimeout(reconnectTimeout.current);
@@ -155,11 +163,10 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
         globalWsInstance.instance = null;
       }
       
-      // Create WebSocket with token in the URL
-      const connectionUrl = `${wsUrl}?token=${encodeURIComponent(token)}`;
-      console.log('Connecting to WebSocket:', connectionUrl);
+      // Create new WebSocket connection without token in URL
+      console.log('Connecting to WebSocket:', wsUrl);
       
-      const wsInstance = new WebSocket(connectionUrl);
+      const wsInstance = new WebSocket(wsUrl);
       globalWsInstance.instance = wsInstance;
       globalWsInstance.url = wsUrl;
       globalWsInstance.token = token;
@@ -167,6 +174,13 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
       // Setup event handlers
       wsInstance.onopen = () => {
         console.log('WebSocket connection established');
+        
+        // Send authentication message first
+        wsInstance.send(JSON.stringify({
+          type: 'authenticate',
+          token: token
+        }));
+        
         setConnectionState('connected');
         reconnectAttempts.current = 0; // Reset reconnect attempts on successful connection
         
@@ -232,12 +246,12 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
       globalWsInstance.instance = null;
       scheduleReconnect();
     }
-  }, [wsUrl, getFreshToken]);
+  }, [wsUrl, getFreshToken, setConnectionState, sendPendingMessages, handleIncomingMessage, reconnect, scheduleReconnect]);
 
   /**
    * Schedule a reconnection attempt with exponential backoff
    */
-  const scheduleReconnect = useCallback(() => {
+  const scheduleReconnectImpl = useCallback(() => {
     if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
       setConnectionState('failed');
       return;
@@ -254,12 +268,12 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
     reconnectTimeout.current = setTimeout(() => {
       initializeWebSocket();
     }, delay);
-  }, [getReconnectDelay, initializeWebSocket]);
+  }, [getReconnectDelay, initializeWebSocket, setConnectionState]);
 
   /**
    * Forcibly reconnect the WebSocket
    */
-  const reconnect = useCallback(() => {
+  const reconnectImpl = useCallback(() => {
     reconnectAttempts.current = 0; // Reset reconnect attempts for manual reconnection
     initializeWebSocket();
   }, [initializeWebSocket]);
@@ -267,15 +281,81 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
   /**
    * Process different types of incoming messages
    */
-  const handleIncomingMessage = useCallback((message: WebSocketMessage) => {
+  const handleIncomingMessageImpl = useCallback((message: WebSocketMessage) => {
     // Let the component handle most message types through the lastMessage state
     
     // Special handling for ping messages
     if (message.type === 'ping') {
       // Respond to server pings to keep connection alive
-      sendMessage('pong', {});
+      // We'll handle this in a useEffect to avoid circular dependency
+      if (globalWsInstance.instance && globalWsInstance.instance.readyState === WebSocket.OPEN) {
+        globalWsInstance.instance.send(JSON.stringify({ type: 'pong', payload: {} }));
+      }
     }
   }, []);
+
+  /**
+   * Store a message in local storage for later transmission
+   */
+  const storePendingMessageImpl = useCallback(async (message: WebSocketMessage) => {
+    try {
+      const pendingMessagesString = await AsyncStorage.getItem('websocket_pending_messages');
+      const pendingMessages = pendingMessagesString ? JSON.parse(pendingMessagesString) : [];
+      
+      pendingMessages.push({
+        message,
+        timestamp: Date.now(),
+      });
+      
+      // Keep only the most recent 50 messages to prevent storage overflow
+      const recentMessages = pendingMessages.slice(-50);
+      
+      await AsyncStorage.setItem('websocket_pending_messages', JSON.stringify(recentMessages));
+    } catch (error) {
+      console.error('Failed to store pending WebSocket message:', error);
+    }
+  }, []);
+
+  /**
+   * Send any pending messages stored in local storage
+   */
+  const sendPendingMessagesImpl = useCallback(async () => {
+    if (!globalWsInstance.instance || globalWsInstance.instance.readyState !== WebSocket.OPEN) return;
+    
+    try {
+      const pendingMessagesString = await AsyncStorage.getItem('websocket_pending_messages');
+      if (!pendingMessagesString) return;
+      
+      const pendingMessages = JSON.parse(pendingMessagesString);
+      console.log(`Sending ${pendingMessages.length} pending WebSocket messages`);
+      
+      // Send each pending message
+      let successCount = 0;
+      for (const item of pendingMessages) {
+        try {
+          globalWsInstance.instance.send(JSON.stringify(item.message));
+          successCount++;
+        } catch (err) {
+          console.error('Failed to send pending message:', err);
+        }
+      }
+      
+      console.log(`Successfully sent ${successCount} of ${pendingMessages.length} pending messages`);
+      
+      // Clear pending messages
+      await AsyncStorage.removeItem('websocket_pending_messages');
+    } catch (error) {
+      console.error('Failed to send pending WebSocket messages:', error);
+    }
+  }, []);
+
+  // Update function implementations after all functions are defined
+  Object.assign(handleIncomingMessage, handleIncomingMessageImpl);
+  Object.assign(storePendingMessage, storePendingMessageImpl);
+  Object.assign(sendPendingMessages, sendPendingMessagesImpl);
+  Object.assign(scheduleReconnect, scheduleReconnectImpl);
+  Object.assign(reconnect, reconnectImpl);
+  Object.assign(initializeWebSocket, initializeWebSocketImpl);
 
   /**
    * Subscribe to a conversation or other topic
@@ -353,62 +433,7 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
         initializeWebSocket();
       }
     }
-  }, [initializeWebSocket]);
-
-  /**
-   * Store a message in local storage for later transmission
-   */
-  const storePendingMessage = useCallback(async (message: WebSocketMessage) => {
-    try {
-      const pendingMessagesString = await AsyncStorage.getItem('websocket_pending_messages');
-      const pendingMessages = pendingMessagesString ? JSON.parse(pendingMessagesString) : [];
-      
-      pendingMessages.push({
-        message,
-        timestamp: Date.now(),
-      });
-      
-      // Keep only the most recent 50 messages to prevent storage overflow
-      const recentMessages = pendingMessages.slice(-50);
-      
-      await AsyncStorage.setItem('websocket_pending_messages', JSON.stringify(recentMessages));
-    } catch (error) {
-      console.error('Failed to store pending WebSocket message:', error);
-    }
-  }, []);
-
-  /**
-   * Send any pending messages stored in local storage
-   */
-  const sendPendingMessages = useCallback(async () => {
-    if (!globalWsInstance.instance || globalWsInstance.instance.readyState !== WebSocket.OPEN) return;
-    
-    try {
-      const pendingMessagesString = await AsyncStorage.getItem('websocket_pending_messages');
-      if (!pendingMessagesString) return;
-      
-      const pendingMessages = JSON.parse(pendingMessagesString);
-      console.log(`Sending ${pendingMessages.length} pending WebSocket messages`);
-      
-      // Send each pending message
-      let successCount = 0;
-      for (const item of pendingMessages) {
-        try {
-          globalWsInstance.instance.send(JSON.stringify(item.message));
-          successCount++;
-        } catch (err) {
-          console.error('Failed to send pending message:', err);
-        }
-      }
-      
-      console.log(`Successfully sent ${successCount} of ${pendingMessages.length} pending messages`);
-      
-      // Clear pending messages
-      await AsyncStorage.removeItem('websocket_pending_messages');
-    } catch (error) {
-      console.error('Failed to send pending WebSocket messages:', error);
-    }
-  }, []);
+  }, [initializeWebSocket, storePendingMessage]);
 
   // Initialize WebSocket on mount and reconnect when URL or token changes
   useEffect(() => {
@@ -420,8 +445,11 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
         clearTimeout(reconnectTimeout.current);
       }
       
+      // Capture the current subscriptions at the time of cleanup to avoid stale references
+      const currentSubscriptions = localSubscriptions.current;
+      
       // Clear local subscriptions but keep the connection for other components
-      localSubscriptions.current.clear();
+      currentSubscriptions.clear();
     };
   }, [wsUrl, initializeWebSocket]);
 

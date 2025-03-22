@@ -3,9 +3,7 @@
  */
 import { renderHook, act } from '@testing-library/react-hooks';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from 'react-native';
 import { useAuthToken } from '../../hooks/useAuthToken';
-import { TokenStatus, AuthError } from '../../types/auth';
 
 // Mock dependencies
 jest.mock('@react-native-async-storage/async-storage');
@@ -68,7 +66,6 @@ describe('useAuthToken hook', () => {
   });
   
   it('should get a fresh token and store it', async () => {
-    const mockToken = createMockToken();
     (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
     
     const { result } = renderHook(() => useAuthToken());

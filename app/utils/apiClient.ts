@@ -410,7 +410,7 @@ export function useApiClient(config?: ApiClientConfig) {
    */
   const createConversationWithFiles = useCallback(async (
     modeId: string,
-    files: Array<{ uri: string, fieldName?: string, type?: string }>,
+    files: { uri: string, fieldName?: string, type?: string }[],
     options: {
       metadata?: Record<string, any>;
       onProgress?: (progress: number) => void;

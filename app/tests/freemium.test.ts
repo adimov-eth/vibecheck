@@ -5,35 +5,35 @@
  * work as expected in various scenarios.
  */
 
-import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { getUserUsageStats, canCreateConversation } from '../../server/src/services/usage.service';
 import { hasActiveSubscription } from '../../server/src/services/subscription.service';
 
 // Mock the database operations
-vi.mock('../../server/src/database', () => ({
+jest.mock('../../server/src/database', () => ({
   db: {
-    select: vi.fn().mockReturnThis(),
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    count: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    then: vi.fn().mockResolvedValue([{ count: 0 }]),
+    select: jest.fn().mockReturnThis(),
+    from: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    count: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    then: jest.fn().mockResolvedValue([{ count: 0 }]),
   }
 }));
 
 // Mock the subscription service
-vi.mock('../../server/src/services/subscription.service', () => ({
-  hasActiveSubscription: vi.fn(),
+jest.mock('../../server/src/services/subscription.service', () => ({
+  hasActiveSubscription: jest.fn(),
 }));
 
 // Mock logger to avoid console noise in tests
-vi.mock('../../server/src/utils/logger.utils', () => ({
-  log: vi.fn(),
+jest.mock('../../server/src/utils/logger.utils', () => ({
+  log: jest.fn(),
 }));
 
 describe('Freemium Logic', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   describe('canCreateConversation', () => {
@@ -63,7 +63,7 @@ describe('Freemium Logic', () => {
       });
       
       // Mock user has used 5 conversations this month
-      vi.mocked(db.then).mockResolvedValueOnce([{ count: 5 }]);
+      jest.mocked(db.then).mockResolvedValueOnce([{ count: 5 }]);
 
       const result = await canCreateConversation('user123');
       
@@ -83,7 +83,7 @@ describe('Freemium Logic', () => {
       });
       
       // Mock user has used 10 conversations this month (at limit)
-      vi.mocked(db.then).mockResolvedValueOnce([{ count: 10 }]);
+      jest.mocked(db.then).mockResolvedValueOnce([{ count: 10 }]);
 
       const result = await canCreateConversation('user123');
       
@@ -122,7 +122,7 @@ describe('Freemium Logic', () => {
       });
       
       // Mock user has used 7 conversations this month
-      vi.mocked(db.then).mockResolvedValueOnce([{ count: 7 }]);
+      jest.mocked(db.then).mockResolvedValueOnce([{ count: 7 }]);
 
       const result = await getUserUsageStats('user123');
       

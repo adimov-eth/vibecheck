@@ -1,3 +1,4 @@
+/* eslint-env jest */
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({
   setItem: jest.fn(() => Promise.resolve()),
@@ -47,6 +48,7 @@ jest.mock('@clerk/clerk-expo/local-credentials', () => ({
 }));
 
 // Mock global btoa and atob (used in token parsing)
+const { Buffer } = require('buffer');
 global.btoa = jest.fn(str => Buffer.from(str, 'binary').toString('base64'));
 global.atob = jest.fn(str => Buffer.from(str, 'base64').toString('binary'));
 

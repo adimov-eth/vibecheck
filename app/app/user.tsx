@@ -18,9 +18,9 @@ export default function Page() {
   const { signOut } = useClerk()
   const [isLoading, setIsLoading] = useState(false)
   
-  const { userOwnsCredentials, clearCredentials } = useLocalCredentials()
+  const { clearCredentials } = useLocalCredentials()
   const { usageStats, isLoading: usageLoading, refreshUsage } = useUsage()
-  const { isSubscribed, subscriptionInfo, checkSubscriptionStatus } = useSubscription()
+  const { isSubscribed, checkSubscriptionStatus } = useSubscription()
   const { getSubscriptionDetails, openSubscriptionSettings } = useSubscriptionCheck()
 
   // Get formatted subscription details
@@ -48,16 +48,6 @@ export default function Page() {
     }
   }
 
-  const handleClearCredentials = async () => {
-    setIsLoading(true)
-    try {
-      await clearCredentials()
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   const navigateToUpdatePassword = () => {
     router.push('/update-user')

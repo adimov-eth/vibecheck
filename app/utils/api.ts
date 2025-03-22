@@ -380,7 +380,7 @@ export function apiDelete<T>(
 export function showApiErrorAlert(
   error: ApiError,
   title = 'Error',
-  customActions?: Array<{ text: string; onPress?: () => void }>
+  customActions?: { text: string; onPress?: () => void }[]
 ): void {
   Alert.alert(
     title,
