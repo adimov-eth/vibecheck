@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
-import { AnalysisResponse } from '../hooks/useAPI';
+import { cancelAllPolling } from '../hooks/useAPI';
+import type { AnalysisResponse } from '../types/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuthToken } from '../hooks/useAuthToken';
 
 interface RecordingData {
   partner1: string;
@@ -69,16 +71,26 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     setProcessingProgressState(progress);
   }, []);
 
-  const clearRecordings = useCallback(() => {
+  const clearRecordingData = useCallback(() => {
     console.log('RecordingContext: Clearing all recording data');
+    
+    // Cancel any active polling for the current conversation
+    if (conversationId) {
+      cancelAllPolling(conversationId);
+    }
+    
     setRecordingData(null);
     setAnalysisResult(null);
     setProcessingProgressState(0);
     
-    // Don't clear conversationId here to prevent issues during transitions
-    // The component that calls clearRecordings should explicitly call setConversationId(null)
-    // when it's appropriate
-  }, []);
+    // Reset conversation ID last to ensure cleanup is complete first
+    if (conversationId) {
+      AsyncStorage.removeItem(CONVERSATION_ID_KEY)
+        .then(() => console.log('Cleared conversation ID from storage'))
+        .catch(err => console.error('Failed to clear conversation ID from storage:', err));
+    }
+    setConversationIdState(null);
+  }, [conversationId]);
 
   const setRecordingDataCallback = useCallback((data: RecordingData | null) => {
     console.log(`RecordingContext: Setting recording data - ${data ? 'with data' : 'null'}`);
@@ -95,6 +107,19 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Add a cleanup effect that runs on app startup and unmount
+  useEffect(() => {
+    // On startup, cancel any stale polling operations
+    cancelAllPolling();
+    
+    return () => {
+      // On unmount, also clean up any active polling
+      if (conversationId) {
+        cancelAllPolling(conversationId);
+      }
+    };
+  }, []);
+
   return (
     <RecordingContext.Provider 
       value={{
@@ -106,7 +131,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         setAnalysisResult: setAnalysisResultCallback,
         setConversationId,
         setProcessingProgress,
-        clearRecordings,
+        clearRecordings: clearRecordingData,
       }}
     >
       {children}

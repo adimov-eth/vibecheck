@@ -21,9 +21,11 @@ const defaultContextValue: UserContextState = {
 const UserContext = createContext<UserContextState>(defaultContextValue);
 
 // Max retry attempts for fetch
-const MAX_RETRY_ATTEMPTS = 3;
+const MAX_RETRY_ATTEMPTS = 2;
 // Base delay between retries (ms)
-const BASE_RETRY_DELAY = 1000;
+const BASE_RETRY_DELAY = 5000;
+// Maximum number of fetches per session
+const MAX_SESSION_FETCHES = 5;
 
 /**
  * User Provider component
@@ -37,8 +39,10 @@ export function UserProvider({ children }: { children: ReactNode }): JSX.Element
   
   // Track fetch attempts to implement backoff
   const retryCount = useRef(0);
+  const sessionFetchCount = useRef(0);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isFetching = useRef(false);
+  const lastFetchTime = useRef<number>(0);
 
   // Calculate exponential backoff delay
   const getBackoffDelay = (attempt: number): number => {
@@ -49,7 +53,7 @@ export function UserProvider({ children }: { children: ReactNode }): JSX.Element
   };
 
   // Function to fetch user profile with retry logic
-  const fetchUserProfile = useCallback(async () => {
+  const fetchUserProfile = useCallback(async (forceRefresh = false) => {
     // Skip fetch if user is not signed in
     if (!isSignedIn) {
       setState(prev => ({
@@ -71,7 +75,24 @@ export function UserProvider({ children }: { children: ReactNode }): JSX.Element
       return;
     }
 
+    // Add minimum time between fetch attempts (5 seconds)
+    const now = Date.now();
+    const timeSinceLastFetch = now - lastFetchTime.current;
+    if (!forceRefresh && timeSinceLastFetch < 5000 && lastFetchTime.current !== 0) {
+      console.log('Skipping profile fetch, too soon since last attempt');
+      return;
+    }
+
+    // Limit number of fetches per session
+    if (sessionFetchCount.current >= MAX_SESSION_FETCHES && !forceRefresh) {
+      console.log(`Maximum session fetch count (${MAX_SESSION_FETCHES}) reached, skipping automated fetch`);
+      return;
+    }
+
     isFetching.current = true;
+    lastFetchTime.current = now;
+    sessionFetchCount.current += 1;
+    
     setState(prev => ({
       ...prev,
       isLoading: true,
@@ -91,7 +112,7 @@ export function UserProvider({ children }: { children: ReactNode }): JSX.Element
       console.error('Error loading profile:', error);
       
       // Implement retry with exponential backoff
-      if (retryCount.current < MAX_RETRY_ATTEMPTS) {
+      if (retryCount.current < MAX_RETRY_ATTEMPTS && forceRefresh) {
         const delay = getBackoffDelay(retryCount.current);
         console.log(`Retrying profile fetch in ${delay}ms (attempt ${retryCount.current + 1}/${MAX_RETRY_ATTEMPTS})`);
         
@@ -104,7 +125,7 @@ export function UserProvider({ children }: { children: ReactNode }): JSX.Element
         retryTimeoutRef.current = setTimeout(() => {
           retryCount.current += 1;
           isFetching.current = false;
-          fetchUserProfile();
+          fetchUserProfile(forceRefresh);
         }, delay);
         
         // Don't set error state during retry attempts
@@ -143,7 +164,11 @@ export function UserProvider({ children }: { children: ReactNode }): JSX.Element
   // Fetch profile only when auth is loaded, user is signed in, and token is initialized
   useEffect(() => {
     if (isLoaded && isSignedIn && tokenInitialized && !isFetching.current) {
-      fetchUserProfile();
+      // Reset session fetch count when dependencies change
+      if (!state.profile) {
+        sessionFetchCount.current = 0;
+      }
+      fetchUserProfile(false);
     }
   }, [fetchUserProfile, isLoaded, isSignedIn, tokenInitialized]);
 
@@ -152,7 +177,8 @@ export function UserProvider({ children }: { children: ReactNode }): JSX.Element
     // Reset retry counter on manual refresh
     retryCount.current = 0;
     isFetching.current = false;
-    return fetchUserProfile();
+    // Force refresh ignores session fetch limit
+    return fetchUserProfile(true);
   }, [fetchUserProfile]);
 
   return (
