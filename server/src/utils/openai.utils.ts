@@ -16,7 +16,7 @@ export const transcribeAudio = async (filePath: string): Promise<string> => {
     const file = new File([fileBuffer], fileName, { type: mimeType });
     const response = await openai.audio.transcriptions.create({
       file,
-      model: 'whisper-1',
+      model: 'gpt-4o-mini-transcribe',
     });
     return response.text;
   } catch (error) {
@@ -49,7 +49,7 @@ function getMimeType(extension: string): string {
 export const generateGptResponse = async (prompt: string): Promise<string> => {
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4',
+      model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
     });
     return response.choices[0].message.content || '';

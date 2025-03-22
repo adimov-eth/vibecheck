@@ -1,76 +1,158 @@
+/**
+ * Sign In Screen
+ * Handles user authentication with email/password
+ */
+import { useState, useCallback } from 'react'
 import { useSignIn } from '@clerk/clerk-expo'
 import { Link, useRouter } from 'expo-router'
-import { Text, TextInput, View, StyleSheet } from 'react-native'
-import { useState } from 'react'
-import { useLocalCredentials } from '@clerk/clerk-expo/local-credentials'
-import Button from '../../components/Button' 
+import { Text, View, StyleSheet } from 'react-native'
+import Button from '../../components/Button'
 import { colors, typography, spacing } from '../styles'
+import { SignInState } from '../../types/auth'
+import { FormField } from '../../components/auth/FormField'
+import { PasswordInput } from '../../components/auth/PasswordInput'
+import { ErrorMessage } from '../../components/auth/ErrorMessage'
+import { validateEmail } from '../../utils/validation'
 
-export default function Page() {
+/**
+ * Sign In Page Component
+ * Provides email/password authentication
+ * @returns JSX Element for sign in screen
+ */
+export default function Page(): JSX.Element {
   const router = useRouter()
   const { signIn, setActive, isLoaded } = useSignIn()
-  const { hasCredentials, setCredentials, authenticate, biometricType } = useLocalCredentials()
 
-  const [emailAddress, setEmailAddress] = useState('')
-  const [password, setPassword] = useState('')
+  // Form state management using our SignInState interface
+  const [formState, setFormState] = useState<SignInState>({
+    emailAddress: '',
+    password: '',
+    isLoading: false,
+    error: ''
+  })
+  
+  // Destructure form state for easier access
+  const { emailAddress, password, isLoading, error } = formState
+  
+  // Update form field helper
+  const updateFormField = (field: keyof SignInState, value: string): void => {
+    setFormState(prev => ({
+      ...prev,
+      [field]: value,
+      // Clear error when user makes changes
+      error: ''
+    }))
+  }
 
-  const onSignInPress = async (useLocal: boolean) => {
+  /**
+   * Handle sign in with email/password
+   */
+  const onSignInPress = async (): Promise<void> => {
     if (!isLoaded) return
+    
+    // Set loading state
+    setFormState(prev => ({ ...prev, isLoading: true, error: '' }))
 
     try {
-      const signInAttempt =
-        hasCredentials && useLocal
-          ? await authenticate()
-          : await signIn.create({
-              identifier: emailAddress,
-              password,
-            })
+      // Attempt sign in with email/password
+      const signInAttempt = await signIn.create({
+        identifier: emailAddress,
+        password,
+      })
 
+      // Handle successful authentication
       if (signInAttempt.status === 'complete') {
-        if (!useLocal) {
-          await setCredentials({
-            identifier: emailAddress,
-            password,
-          })
-        }
+        // Set active session and navigate to home
         await setActive({ session: signInAttempt.createdSessionId })
         router.replace('/')
       } else {
+        // Handle incomplete authentication
         console.error(JSON.stringify(signInAttempt, null, 2))
+        setFormState(prev => ({
+          ...prev, 
+          error: 'Authentication incomplete. Please try again.'
+        }))
       }
     } catch (err) {
+      // Handle authentication errors
       console.error(JSON.stringify(err, null, 2))
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : 'Failed to sign in. Please check your credentials and try again.'
+      
+      setFormState(prev => ({ ...prev, error: errorMessage }))
+    } finally {
+      // Reset loading state
+      setFormState(prev => ({ ...prev, isLoading: false }))
     }
   }
 
+  /**
+   * Validate input before submission
+   * @returns Whether the form is valid
+   */
+  const validateInput = useCallback((): boolean => {
+    const emailValidation = validateEmail(emailAddress);
+    
+    if (!emailValidation.isValid) {
+      setFormState(prev => ({ ...prev, error: emailValidation.errorMessage }));
+      return false;
+    }
+    
+    if (!password) {
+      setFormState(prev => ({ ...prev, error: 'Password is required' }));
+      return false;
+    }
+    
+    return true;
+  }, [emailAddress, password]);
+
   return (
     <View style={styles.container}>
-      <TextInput
-        style={styles.input}
-        autoCapitalize="none"
+      <Text style={styles.title}>Welcome back</Text>
+      <Text style={styles.subtitle}>Log in to your account</Text>
+      
+      {/* Error message component */}
+      <ErrorMessage message={error} />
+      
+      {/* Email input */}
+      <FormField
+        label="Email"
         value={emailAddress}
-        placeholder="Enter email"
-        onChangeText={setEmailAddress}
+        onChangeText={(value: string) => updateFormField('emailAddress', value)}
+        placeholder="Enter your email"
+        editable={!isLoading}
+        keyboardType="email-address"
+        autoCapitalize="none"
       />
-      <TextInput
-        style={styles.input}
-        value={password}
-        placeholder="Enter password"
-        secureTextEntry={true}
-        onChangeText={setPassword}
-      />
-      <Button title="Sign In" onPress={() => onSignInPress(false)} variant="primary" />
-      {hasCredentials && biometricType && (
-        <Button
-          title={biometricType === 'face-recognition' ? 'Sign in with Face ID' : 'Sign in with Touch ID'}
-          onPress={() => onSignInPress(true)}
-          variant="secondary"
+      
+      {/* Password input with toggle */}
+      <View style={styles.passwordContainer}>
+        <PasswordInput
+          value={password}
+          onChangeText={(value: string) => updateFormField('password', value)}
+          placeholder="Enter your password"
+          editable={!isLoading}
         />
-      )}
+        <Link href="/(auth)/forgot-password" style={styles.forgotPasswordLink}>
+          <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+        </Link>
+      </View>
+      
+      {/* Sign in button */}
+      <Button 
+        title="Sign In" 
+        onPress={() => validateInput() && onSignInPress()} 
+        variant="primary" 
+        loading={isLoading}
+        disabled={isLoading || !emailAddress || !password}
+      />
+      
+      {/* Sign up link */}
       <View style={styles.linkContainer}>
-        <Text>Don't have an account?</Text>
-        <Link href="/sign-up">
-          <Text style={styles.linkText}>Sign up</Text>
+        <Text style={styles.linkText}>Don't have an account?</Text>
+        <Link href="/(auth)/sign-up">
+          <Text style={styles.actionLinkText}>Sign up</Text>
         </Link>
       </View>
     </View>
@@ -80,25 +162,47 @@ export default function Page() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: spacing.xl, // 20
-    backgroundColor: colors.background, // #FCFDFE
+    padding: spacing.xl,
+    backgroundColor: colors.background,
   },
-  input: {
-    ...typography.body1, // Inter-Regular, 16px
-    color: colors.darkText, // #292D32
-    backgroundColor: colors.white, // #FFFFFF
-    borderWidth: 1,
-    borderColor: colors.border, // #E3E9EE
-    borderRadius: 8,
-    padding: spacing.md, // 12
-    marginBottom: spacing.md, // 12
+  title: {
+    ...typography.heading1,
+    color: colors.darkText,
+    marginBottom: spacing.xs,
+    textAlign: 'center',
+  },
+  subtitle: {
+    ...typography.body2,
+    color: colors.mediumText,
+    marginBottom: spacing.lg,
+    textAlign: 'center',
+  },
+  passwordContainer: {
+    width: '100%',
+    marginBottom: spacing.lg,
+  },
+  forgotPasswordLink: {
+    alignSelf: 'flex-end',
+    marginTop: spacing.xs,
+  },
+  forgotPasswordText: {
+    ...typography.body2,
+    color: colors.primary,
   },
   linkContainer: {
-    marginTop: spacing.md, // 12
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
+    marginTop: spacing.xl,
   },
   linkText: {
-    color: colors.primary, // #2566FE
-    ...typography.buttonText, // Inter-SemiBold, 14px
+    ...typography.body2,
+    color: colors.mediumText,
+    marginRight: spacing.xs,
+  },
+  actionLinkText: {
+    ...typography.body2,
+    color: colors.primary,
+    fontWeight: 'bold',
   },
 })

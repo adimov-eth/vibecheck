@@ -14,6 +14,9 @@ import * as Crypto from 'expo-crypto';
 import { useAudioRecording, AudioRecordingHook } from '../../hooks/useAudioRecording';
 import { useUpload, UploadHook } from '../../hooks/useUpload';
 import { useApi, ApiHook } from '../../hooks/useAPI';
+import { useSubscriptionCheck } from '../../hooks/useSubscriptionCheck';
+import { router } from 'expo-router';
+import { useUsage } from '../../contexts/UsageContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -27,8 +30,8 @@ interface Mode {
 interface RecordingScreenProps {
   selectedMode: Mode;
   onGoBack: () => void;
-  onNewRecording: () => void;
-  onRecordingComplete: () => void;
+  onNewRecording?: () => void;
+  onRecordingComplete: (conversationId: string) => void;
 }
 
 export default function RecordingScreen({ selectedMode, onGoBack, onRecordingComplete }: RecordingScreenProps) {
@@ -42,9 +45,14 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
   const [processingComplete, setProcessingComplete] = useState(false);
 
   const { setConversationId, clearRecordings, setRecordingData } = useRecording();
-  const { isRecording, recordingStatus, startRecording, stopRecording, releaseRecordings }: AudioRecordingHook = useAudioRecording();
+  const { isRecording, recordingStatus, startRecording, stopRecording, releaseRecordings, hasBeenReleased }: AudioRecordingHook = useAudioRecording();
   const { uploadAudio, pollForStatus, isUploading }: UploadHook = useUpload();
   const { createConversation, getConversationStatus, pollForResult }: ApiHook = useApi();
+  const { canAccessPremiumFeature } = useSubscriptionCheck();
+  const { checkCanCreateConversation, usageStats, remainingConversationsText } = useUsage();
+
+  // Track whether the cleanup process has already been initiated
+  const cleanupInitiatedRef = useRef(false);
 
   useEffect(() => {
     // Only clear the recordings data, but keep the conversation ID for screen transitions
@@ -70,13 +78,18 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
           // In live mode, upload the single recording immediately
           console.log(`Uploading single recording for live mode, uri: ${savedUri}`);
           const success = await uploadAudio(conversationId!, savedUri);
-          if (success) setUploadsComplete(true);
+          if (success) {
+            setUploadsComplete(true);
+            // For live mode, navigate to processing screen after successful upload
+            setProcessingComplete(true);
+            onRecordingComplete(conversationId!);
+          }
         }
       } else if (partner1Uri) {
         // Immediately navigate to the processing screen
         setProcessingComplete(true);
         // Schedule navigation soon after
-        onRecordingComplete();
+        onRecordingComplete(conversationId!);
         
         // Then continue with the processing in the background
         setPartner2Uri(savedUri);
@@ -96,23 +109,37 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
       setIsProcessing(false);
     } else {
       if (currentPartner === 1) {
+        // Check usage limits before creating a new conversation
+        const canCreate = await checkCanCreateConversation(true);
+        if (!canCreate) {
+          // User has reached limit and alert was shown
+          return;
+        }
+        
         clearRecordings();
         const newConversationId = Crypto.randomUUID();
         setConversationIdState(newConversationId);
         setConversationId(newConversationId);
-        try {
-          const serverConversationId = await createConversation(newConversationId, selectedMode.id, recordMode);
-          if (serverConversationId !== newConversationId) {
-            setConversationIdState(serverConversationId);
-            setConversationId(serverConversationId);
-          }
-        } catch (error) {
-          console.error('Failed to create conversation:', error);
-          showToast.error('Error', 'Failed to create conversation.');
-          return;
-        }
+        
+        // Start recording immediately
+        await startRecording();
+        
+        // Create conversation in the background
+        createConversation(newConversationId, selectedMode.id, recordMode)
+          .then(serverConversationId => {
+            if (serverConversationId !== newConversationId) {
+              setConversationIdState(serverConversationId);
+              setConversationId(serverConversationId);
+            }
+          })
+          .catch(error => {
+            console.error('Failed to create conversation:', error);
+            showToast.error('Error', 'Failed to create conversation, but recording continues.');
+            // We don't stop recording here as we want the UX to be seamless
+          });
+      } else {
+        await startRecording();
       }
-      await startRecording();
     }
   };
 
@@ -125,37 +152,54 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
         setProcessingComplete(true);
         
         // Clean up recordings only after processing is complete
-        setTimeout(() => {
-          releaseRecordings()
-            .then(() => {
-              console.log('All recordings released after processing');
-              
-              // Navigate to results screen only after cleanup
-              console.log('Navigating to results screen');
-              onRecordingComplete();
-            })
-            .catch(err => {
-              console.error('Error releasing recordings:', err);
-              // Still continue to results even on cleanup error
-              console.log('Error during cleanup, still navigating to results');
-              onRecordingComplete();
-            });
-        }, 500); // Small delay before cleanup
+        // Only initiate cleanup if not already done
+        if (!cleanupInitiatedRef.current && !hasBeenReleased) {
+          cleanupInitiatedRef.current = true;
+          
+          setTimeout(() => {
+            releaseRecordings()
+              .then(() => {
+                console.log('All recordings released after processing');
+                
+                // Navigate to results screen only after cleanup
+                console.log('Navigating to results screen');
+                onRecordingComplete(conversationId!);
+              })
+              .catch(err => {
+                console.error('Error releasing recordings:', err);
+                // Still continue to results even on cleanup error
+                console.log('Error during cleanup, still navigating to results');
+                onRecordingComplete(conversationId!);
+              });
+          }, 500); // Small delay before cleanup
+        } else if (cleanupInitiatedRef.current || hasBeenReleased) {
+          // If already cleaned up, just navigate
+          console.log('Cleanup already initiated or recordings released, navigating to results');
+          onRecordingComplete(conversationId!);
+        }
       });
       
       // Return the stop polling function for cleanup
       return stopPolling;
     }
-  }, [uploadsComplete, conversationId, pollForStatus, onRecordingComplete, releaseRecordings]);
+  }, [uploadsComplete, conversationId, pollForStatus, onRecordingComplete, releaseRecordings, hasBeenReleased]);
   
   // Ensure all recordings are released when component unmounts
+  // but only if not already handled by the processing completion
   useEffect(() => {
     return () => {
-      releaseRecordings().catch(err => {
-        console.error('Error releasing recordings on unmount:', err);
-      });
+      // Only release if not already initiated by the completion handler
+      // and not already released
+      if (!cleanupInitiatedRef.current && !hasBeenReleased) {
+        console.log('Releasing recordings on component unmount');
+        releaseRecordings().catch(err => {
+          console.error('Error releasing recordings on unmount:', err);
+        });
+      } else {
+        console.log('Skipping release on unmount - already released or cleanup initiated');
+      }
     };
-  }, [releaseRecordings]);
+  }, [releaseRecordings, hasBeenReleased]);
 
   const handleToggleMode = (index: number) => {
     setRecordMode(index === 0 ? 'separate' : 'live');
@@ -192,6 +236,50 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
     return null;
   };
 
+  // Example function to handle a premium feature
+  const handlePremiumFeature = async () => {
+    // Check if user can access premium feature
+    const canAccess = await canAccessPremiumFeature(true, () => {
+      // This callback will be called if user wants to subscribe
+      router.push("/paywall" as any);
+    });
+    
+    if (canAccess) {
+      // User has subscription, allow premium feature
+      console.log('User has subscription, allow premium feature');
+      // Implement premium feature here
+    }
+  };
+
+  const renderUsageIndicator = () => {
+    if (!usageStats) return null;
+    
+    const isSubscribed = usageStats.isSubscribed;
+    const limitReached = !isSubscribed && usageStats.remainingConversations <= 0;
+    
+    return (
+      <View style={styles.usageIndicator}>
+        <Text style={[
+          styles.usageText, 
+          isSubscribed ? styles.unlimitedText : (limitReached ? styles.limitReachedText : {})
+        ]}>
+          {isSubscribed ? '∞ Unlimited' : 
+           (usageStats.remainingConversations > 0 ? 
+             `${usageStats.remainingConversations} conversations left` : 
+             'No conversations left')}
+        </Text>
+        {!isSubscribed && (
+          <TouchableOpacity 
+            style={styles.upgradeButton}
+            onPress={() => router.push('/paywall' as any)}
+          >
+            <Text style={styles.upgradeText}>Upgrade</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
@@ -213,6 +301,7 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
             />
           </View>
           <View style={styles.divider} />
+          {renderUsageIndicator()}
           <View style={styles.controlsContainer}>
             <View style={styles.toggleContainer}>
               <View style={styles.modeLabel}>
@@ -303,5 +392,38 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.background,
+  },
+  usageIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: layout.borderRadius.medium,
+  },
+  usageText: {
+    ...typography.body2,
+    color: colors.mediumText,
+  },
+  unlimitedText: {
+    color: colors.success,
+    fontWeight: '600',
+  },
+  limitReachedText: {
+    color: colors.error,
+    fontWeight: '600',
+  },
+  upgradeButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: layout.borderRadius.small,
+  },
+  upgradeText: {
+    ...typography.caption,
+    color: colors.white,
+    fontWeight: '600',
   },
 });
