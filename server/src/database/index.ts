@@ -110,18 +110,18 @@ export const getDbConnection = (): PooledDatabase => {
 let defaultConnection: PooledDatabase | null = null;
 
 // Initialize default connection
-const initializeDb = (): void => {
-  try {
-    defaultConnection = getDbConnection();
-    log('Default database connection established', 'info');
-  } catch (error) {
-    log(`Failed to establish default database connection: ${error}`, 'error');
-    process.exit(1);
-  }
+export const initializeDb = (): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    try {
+      defaultConnection = getDbConnection();
+      log('Default database connection established', 'info');
+      resolve();
+    } catch (error) {
+      log(`Failed to establish default database connection: ${error}`, 'error');
+      reject(error);
+    }
+  });
 };
-
-// Start initialization immediately
-initializeDb();
 
 // Export a proxy for simpler use
 export const db = new Proxy({} as PooledDatabase, {
