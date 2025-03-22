@@ -52,7 +52,8 @@ async function addIndexes() {
     log(`Error during database optimization migration: ${error}`, 'error');
     throw error;
   } finally {
-    await closeDbConnections();
+    // Don't close connections here as it will close the default connection used by the application
+    // await closeDbConnections();
   }
 }
 

@@ -13,7 +13,7 @@ import { useUsage } from '../contexts/UsageContext'
 import { useSubscription } from '../contexts/SubscriptionContext'
 import { useSubscriptionCheck } from '../hooks/useSubscriptionCheck'
 
-export default function Page() {
+function Page() {
   const { user } = useClerkUser()
   const { signOut } = useClerk()
   const [isLoading, setIsLoading] = useState(false)
@@ -214,6 +214,8 @@ export default function Page() {
     </SafeAreaView>
   )
 }
+
+export default Page
 
 const styles = StyleSheet.create({
   safeArea: {
