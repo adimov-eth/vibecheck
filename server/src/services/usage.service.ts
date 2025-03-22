@@ -1,4 +1,4 @@
-import { db } from '../database';
+import { PooledDatabase } from '../database';
 import { conversations } from '../database/schema';
 import { eq, and, gte, count } from 'drizzle-orm';
 import { log } from '../utils/logger.utils';
@@ -18,32 +18,27 @@ function getCurrentMonthStart(): Date {
 /**
  * Count conversations created by a user in the current month
  */
-export async function countUserConversationsThisMonth(userId: string): Promise<number> {
-  try {
-    const monthStart = getCurrentMonthStart();
-    
-    // Query conversations created by the user since the start of the current month
-    const result = await db
-      .select({ count: count() })
-      .from(conversations)
-      .where(
-        and(
-          eq(conversations.userId, userId),
-          gte(conversations.createdAt, monthStart)
-        )
-      );
-    
-    return result[0]?.count || 0;
-  } catch (error) {
-    log(`Error counting user conversations: ${error instanceof Error ? error.message : String(error)}`, 'error');
-    throw error;
-  }
+export async function countUserConversationsThisMonth(userId: string, db: PooledDatabase): Promise<number> {
+  const monthStart = getCurrentMonthStart();
+  
+  // Query conversations created by the user since the start of the current month
+  const result = await db
+    .select({ count: count() })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.userId, userId),
+        gte(conversations.createdAt, monthStart)
+      )
+    );
+  
+  return result[0]?.count || 0;
 }
 
 /**
  * Check if a user can create a new conversation based on their subscription status and usage
  */
-export async function canCreateConversation(userId: string): Promise<{
+export async function canCreateConversation(userId: string, db: PooledDatabase): Promise<{
   canCreate: boolean;
   reason?: string;
   currentUsage: number;
@@ -52,7 +47,7 @@ export async function canCreateConversation(userId: string): Promise<{
 }> {
   try {
     // First check if user has an active subscription
-    const subscriptionStatus = await hasActiveSubscription(userId);
+    const subscriptionStatus = await hasActiveSubscription(userId, db);
     
     // If user is subscribed, they have unlimited access
     if (subscriptionStatus.isActive) {
@@ -65,7 +60,7 @@ export async function canCreateConversation(userId: string): Promise<{
     }
     
     // For free tier users, check their current usage
-    const conversationCount = await countUserConversationsThisMonth(userId);
+    const conversationCount = await countUserConversationsThisMonth(userId, db);
     const canCreate = conversationCount < FREE_TIER_MONTHLY_LIMIT;
     
     return {
@@ -93,7 +88,7 @@ export async function canCreateConversation(userId: string): Promise<{
 /**
  * Get user's current usage stats
  */
-export async function getUserUsageStats(userId: string): Promise<{
+export async function getUserUsageStats(userId: string, db: PooledDatabase): Promise<{
   currentUsage: number;
   limit: number;
   isSubscribed: boolean;
@@ -101,7 +96,7 @@ export async function getUserUsageStats(userId: string): Promise<{
   resetDate: Date;
 }> {
   try {
-    const subscriptionStatus = await hasActiveSubscription(userId);
+    const subscriptionStatus = await hasActiveSubscription(userId, db);
     
     // For subscribers, return unlimited usage info
     if (subscriptionStatus.isActive) {
@@ -115,7 +110,7 @@ export async function getUserUsageStats(userId: string): Promise<{
     }
     
     // For free tier users, calculate remaining conversations
-    const conversationCount = await countUserConversationsThisMonth(userId);
+    const conversationCount = await countUserConversationsThisMonth(userId, db);
     const remainingConversations = Math.max(0, FREE_TIER_MONTHLY_LIMIT - conversationCount);
     
     // Calculate next reset date (1st of next month)

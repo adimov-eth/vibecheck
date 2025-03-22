@@ -3,8 +3,8 @@
  * Provides request interceptors, header generators, and error handling
  */
 import { Alert } from 'react-native';
-import { TokenStatus, AuthError } from '../types/auth';
-import { checkNetworkStatus, NetworkStatus } from './network';
+import { AuthError } from '../types/auth';
+import { checkNetworkStatus } from './network';
 
 // Constants
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://api.vibecheck.app';
@@ -210,7 +210,7 @@ export async function apiRequest<T>(
 
   try {
     // Make request with timeout
-    const { fetchPromise, controller } = fetchWithTimeout(url, {
+    const { fetchPromise } = fetchWithTimeout(url, {
       ...fetchOptions,
       method,
       headers,

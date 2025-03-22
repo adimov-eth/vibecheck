@@ -1,109 +1,88 @@
 import dotenv from 'dotenv';
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, RequestHandler, ErrorRequestHandler } from 'express';
 import http from 'http';
 import helmet from 'helmet';
 import cors from 'cors';
-import { errorHandler } from './middleware/error.middleware.js';
-import authRoutes from './routes/auth.routes.js';
-import conversationRoutes from './routes/conversation.routes.js';
-import audioRoutes from './routes/audio.routes.js';
-import subscriptionRoutes from './routes/subscription.routes.js';
-import usageRoutes from './routes/usage.routes.js';
-import userRoutes from './routes/user.routes.js';
-import { config } from '../config.js';
+import { errorHandler } from './middleware/error.middleware';
+import { getDbConnection } from '../database';
+import authRoutes from './routes/auth.routes';
+import conversationRoutes from './routes/conversation.routes';
+import audioRoutes from './routes/audio.routes';
+import subscriptionRoutes from './routes/subscription.routes';
+import usageRoutes from './routes/usage.routes';
+import userRoutes from './routes/user.routes';
+import { config } from '../config';
 import { clerkMiddleware, requireAuth, getAuth } from '@clerk/express';
-import { logger } from '../utils/logger.utils.js';
-import { websocketManager } from '../utils/websocket.utils.js';
-import { 
-  authRateLimiter, 
-  conversationsRateLimiter, 
+import { logger } from '../utils/logger.utils';
+import { websocketManager } from '../utils/websocket.utils';
+import {
+  authRateLimiter,
+  conversationsRateLimiter,
   audioRateLimiter,
   subscriptionsRateLimiter,
   usageRateLimiter,
   usersRateLimiter,
-  defaultRateLimiter
-} from './middleware/rate-limit.middleware.js';
+  defaultRateLimiter,
+} from './middleware/rate-limit.middleware';
+import { dbMiddleware } from './middleware/db.middleware';
 
 dotenv.config();
 
 export const createApp = () => {
-  // Create Express app
   const app = express();
-  
-  // Create HTTP server using Express app
   const server = http.createServer(app);
-  
-  // Security middleware
+
   app.use(helmet());
-  
-  // CORS middleware
   app.use(cors({
-    origin: '*', // Or specify your domains
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization'],
   }));
-  
-  // Request logging middleware
-  app.use((req: Request, res: Response, next: NextFunction) => {
+
+  const requestLogger: RequestHandler = (req, res, next) => {
     logger.debug(`${req.method} ${req.path}`);
     next();
-  });
-  
-  // Apply default rate limiter to all routes
-  app.use(defaultRateLimiter);
+  };
+  app.use(requestLogger);
 
-  // Clerk authentication middleware
-  app.use(
-    clerkMiddleware({
-      debug: true, // Enable debug mode for development
-    })
-  );
+  app.use(defaultRateLimiter as RequestHandler);
 
-  // Parse JSON request bodies
+  app.use(clerkMiddleware({ debug: true }));
+
+  // Attach database connection to each request
+  app.use(dbMiddleware as RequestHandler);
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Clerk auth middleware for protected routes
-  const clerkAuth = requireAuth({
-    secretKey: config.clerkSecretKey,
-  });
-
-  // Debug middleware for auth
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    const auth = getAuth(req);
-    logger.debug(
-      `Auth debug - Path: ${req.path}, userId: ${auth?.userId || 'none'}`
-    );
+  const authLogger: RequestHandler = (req, res, next) => {
+    const auth = getAuth(req as any);
+    logger.debug(`Auth debug - Path: ${req.path}, userId: ${auth?.userId || 'none'}`);
     next();
-  });
+  };
+  app.use(authLogger);
 
-  // Health check endpoint
-  app.get('/health', (req, res) => {
+  const healthCheck: RequestHandler = (req, res) => {
     res.status(200).json({ status: 'ok' });
-  });
+  };
+  app.get('/health', healthCheck);
 
-  // Apply route-specific rate limiters
-  app.use('/auth', authRateLimiter, authRoutes);
-  app.use('/conversations', clerkAuth, conversationsRateLimiter, conversationRoutes);
-  app.use('/audio', clerkAuth, audioRateLimiter, audioRoutes);
-  app.use('/subscriptions', subscriptionsRateLimiter, subscriptionRoutes);
-  app.use('/usage', clerkAuth, usageRateLimiter, usageRoutes);
-  app.use('/users', clerkAuth, usersRateLimiter, userRoutes);
+  const clerkAuth = requireAuth({ secretKey: config.clerkSecretKey });
 
-  // 404 handler
-  app.use((req, res, next) => {
-    res.status(404).json({
-      error: 'Not Found',
-      message: 'The requested resource was not found',
-    });
-  });
+  app.use('/auth', authRateLimiter as RequestHandler, authRoutes);
+  app.use('/conversations', clerkAuth, conversationsRateLimiter as RequestHandler, conversationRoutes);
+  app.use('/audio', clerkAuth, audioRateLimiter as RequestHandler, audioRoutes);
+  app.use('/subscriptions', subscriptionsRateLimiter as RequestHandler, subscriptionRoutes);
+  app.use('/usage', clerkAuth, usageRateLimiter as RequestHandler, usageRoutes);
+  app.use('/users', clerkAuth, usersRateLimiter as RequestHandler, userRoutes);
 
-  // Error handler
-  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-    errorHandler(err, req, res, next);
-  });
+  const notFoundHandler: RequestHandler = (req, res) => {
+    res.status(404).json({ error: 'Not Found', message: 'The requested resource was not found' });
+  };
+  app.use(notFoundHandler);
 
-  // Initialize WebSocket server if enabled
+  app.use(errorHandler as ErrorRequestHandler);
+
   if (config.webSocket.enabled) {
     websocketManager.initialize(server);
     logger.info('WebSocket server initialized');

@@ -1,7 +1,6 @@
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useAuth } from '@clerk/clerk-expo';
 import * as FileSystem from "expo-file-system";
 
 import Constants from 'expo-constants';

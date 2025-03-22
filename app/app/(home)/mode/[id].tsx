@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { SafeAreaView, StyleSheet, View, Text } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { colors, typography, spacing, layout } from '../../styles';
+import { colors, typography, spacing } from '../../styles';
 import RecordingScreen from '../RecordingScreen';
 import AppBar from '../../../components/AppBar';
 import ModeCard from '../../../components/ModeCard';
 import Button from '../../../components/Button';
-import { useUsage } from '../../../contexts/UsageContext';
+import { useUsageStats } from '../../../hooks/useApiQueries'; // Replace UsageContext with useUsageStats
 
 // Define the Mode interface locally since it doesn't exist in a central types file
 interface Mode {
@@ -19,7 +19,7 @@ interface Mode {
 export default function ModePage() {
   const router = useRouter();
   const { id, title, description, color } = useLocalSearchParams();
-  const { checkCanCreateConversation } = useUsage();
+  const { data: usageStats, isLoading: usageLoading } = useUsageStats(); // Get usage stats
   const [showRecording, setShowRecording] = useState(false);
 
   const selectedMode: Mode = {
@@ -37,23 +37,28 @@ export default function ModePage() {
     }
   }, [showRecording, router]);
 
-  const handleRecordingComplete = useCallback((conversationId: string) => {
-    // Navigate to results screen with the conversation ID
-    router.push({
-      pathname: '/results/[id]' as any, // Using type assertion to fix TypeScript error
-      params: { id: conversationId }
-    });
-  }, [router]);
+  const handleRecordingComplete = useCallback(
+    (conversationId: string) => {
+      router.push({
+        pathname: '/results/[id]' as any,
+        params: { id: conversationId },
+      });
+    },
+    [router]
+  );
 
-  const handleStartRecording = async () => {
-    // Check if user can create a new conversation
-    const canCreate = await checkCanCreateConversation(true); // Show paywall if limit reached
-    
+  const handleStartRecording = useCallback(() => {
+    if (usageLoading) {
+      return; // Wait until usage stats are loaded
+    }
+    const canCreate =
+      usageStats?.isSubscribed || (usageStats?.remainingConversations ?? 0) > 0;
     if (canCreate) {
       setShowRecording(true);
+    } else {
+      router.push('/paywall'); // Navigate to paywall if limit reached
     }
-    // If canCreate is false, the paywall or alert will be shown by checkCanCreateConversation
-  };
+  }, [usageStats, usageLoading, router]);
 
   // If any required param is missing, go back to home
   if (!id || !title || !description || !color) {
@@ -61,7 +66,6 @@ export default function ModePage() {
     return null;
   }
 
-  // Render recording screen if in recording mode
   if (showRecording) {
     return (
       <RecordingScreen
@@ -74,11 +78,7 @@ export default function ModePage() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <AppBar
-        showBackButton={true}
-        onBackPress={handleGoBack}
-        title="Mode Details"
-      />
+      <AppBar showBackButton={true} onBackPress={handleGoBack} title="Mode Details" />
       <View style={styles.container}>
         <View style={styles.cardContainer}>
           <ModeCard
@@ -90,20 +90,19 @@ export default function ModePage() {
             onPress={() => {}}
           />
         </View>
-        
+
         <View style={styles.contentContainer}>
           <Text style={styles.descriptionTitle}>How it works</Text>
-          <Text style={styles.description}>
-            {getModeLongDescription(selectedMode.id)}
-          </Text>
+          <Text style={styles.description}>{getModeLongDescription(selectedMode.id)}</Text>
         </View>
-        
+
         <View style={styles.actionsContainer}>
           <Button
             title="Start Conversation"
             variant="primary"
             size="large"
             onPress={handleStartRecording}
+            disabled={usageLoading} // Disable button while loading
           />
         </View>
       </View>

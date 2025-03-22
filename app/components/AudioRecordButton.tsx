@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, layout } from '../app/styles';
+import { colors } from '../app/styles';
 
 interface AudioRecordButtonProps {
   isRecording: boolean;
@@ -59,7 +59,7 @@ const AudioRecordButton: React.FC<AudioRecordButtonProps> = ({
       rippleOpacity.setValue(0.2);
       buttonScale.setValue(1);
     }
-  }, [isRecording]);
+  }, [buttonScale, isRecording, rippleOpacity, rippleScale]);
 
   return (
     <View style={styles.container}>

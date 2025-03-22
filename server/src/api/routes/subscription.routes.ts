@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { 
   verifyAndSaveSubscription,
@@ -10,12 +10,12 @@ import { z } from 'zod';
 const router = express.Router();
 
 // Schema validation for receipt verification request
-const verifyReceiptSchema = z.object({
+export const verifyReceiptSchema = z.object({
   receiptData: z.string().min(1, "Receipt data is required"),
 });
 
 // Schema for notification body from App Store Server Notifications
-const appStoreNotificationSchema = z.object({
+export const appStoreNotificationSchema = z.object({
   notificationType: z.string(),
   notificationUUID: z.string(),
   data: z.object({
@@ -31,10 +31,9 @@ const appStoreNotificationSchema = z.object({
  */
 router.post(
   '/verify', 
-  authMiddleware, 
-  async (req: Request, res: Response, next: NextFunction) => {
+  authMiddleware as RequestHandler,
+  (async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // Validate request body
       const validationResult = verifyReceiptSchema.safeParse(req.body);
       if (!validationResult.success) {
         return res.status(400).json({ 
@@ -52,8 +51,7 @@ router.post(
       
       log(`Verifying receipt for user: ${userId}`, 'info');
       
-      // Verify the receipt and save subscription
-      const result = await verifyAndSaveSubscription(userId, receiptData);
+      const result = await verifyAndSaveSubscription(userId, receiptData, req.db);
       
       if (!result.isValid) {
         return res.status(400).json({
@@ -74,7 +72,7 @@ router.post(
       log(`Error in verify receipt endpoint: ${error instanceof Error ? error.message : String(error)}`, 'error');
       next(error);
     }
-  }
+  }) as RequestHandler
 );
 
 /**
@@ -83,8 +81,8 @@ router.post(
  */
 router.get(
   '/status',
-  authMiddleware,
-  async (req: Request, res: Response, next: NextFunction) => {
+  authMiddleware as RequestHandler,
+  (async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.userId;
       
@@ -92,8 +90,7 @@ router.get(
         return res.status(401).json({ error: 'User ID not found in request' });
       }
       
-      // Check if user has an active subscription
-      const subscription = await hasActiveSubscription(userId);
+      const subscription = await hasActiveSubscription(userId, req.db);
       
       res.status(200).json({
         isSubscribed: subscription.isActive,
@@ -106,21 +103,19 @@ router.get(
       log(`Error in subscription status endpoint: ${error instanceof Error ? error.message : String(error)}`, 'error');
       next(error);
     }
-  }
+  }) as RequestHandler
 );
 
 /**
  * Handle App Store Server Notifications
  * POST /subscriptions/notifications
- * This endpoint doesn't require authentication as it's called by Apple's servers
  */
 router.post(
-  '/notifications',
-  async (req: Request, res: Response, next: NextFunction) => {
+  '/notifications', 
+  (async (req: Request, res: Response, next: NextFunction) => {
     try {
       log('Received App Store notification', 'info');
       
-      // Validate notification format
       const validationResult = appStoreNotificationSchema.safeParse(req.body);
       if (!validationResult.success) {
         log(`Invalid notification format: ${JSON.stringify(validationResult.error.errors)}`, 'error');
@@ -132,19 +127,14 @@ router.post(
       
       const notification = validationResult.data;
       
-      // Log the notification for debugging/monitoring
       log(`App Store notification: ${JSON.stringify(notification)}`, 'info');
-      
-      // For now, we just acknowledge receipt of the notification
-      // In a production environment, you would process these notifications
-      // to update subscription status based on renewal, expiration, etc.
       
       res.status(200).json({ success: true });
     } catch (error) {
       log(`Error in App Store notifications endpoint: ${error instanceof Error ? error.message : String(error)}`, 'error');
       next(error);
     }
-  }
+  }) as RequestHandler
 );
 
-export default router; 
+export default router;

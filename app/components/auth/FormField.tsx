@@ -3,7 +3,7 @@
  * A reusable component for form fields with label and validation
  */
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, AccessibilityInfo } from 'react-native';
+import { View, Text, TextInput, StyleSheet } from 'react-native';
 import { colors, typography, spacing } from '../../app/styles';
 
 interface FormFieldProps {

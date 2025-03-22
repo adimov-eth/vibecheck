@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, ScrollView, StyleSheet, Text, SafeAreaView, Dimensions } from 'react-native';
-import { colors, spacing, typography, layout } from '../styles';
+import { colors, spacing, typography } from '../styles';
 import ModeCard from '../../components/ModeCard';
 import AppBar from '../../components/AppBar';
 import { useRouter } from 'expo-router';

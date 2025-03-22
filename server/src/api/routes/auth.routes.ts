@@ -1,4 +1,4 @@
-import express, { NextFunction, Request, Response } from 'express';
+import express, { NextFunction, Request, Response, RequestHandler } from 'express';
 import { createClerkClient } from '@clerk/backend';
 import { config } from '../../config';
 const router = express.Router();
@@ -8,7 +8,7 @@ const clerk = createClerkClient({
 
 // We'll use Clerk's hosted authentication pages and JWT verification
 // The frontend will handle the actual authentication flow
-router.get('/user', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/user', (async (req: Request, res: Response, next: NextFunction) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -25,5 +25,6 @@ router.get('/user', async (req: Request, res: Response, next: NextFunction) => {
     // Pass authentication errors to the error handler
     next(error);
   }
-});
+}) as RequestHandler);
+
 export default router;

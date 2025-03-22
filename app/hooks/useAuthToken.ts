@@ -7,7 +7,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { AuthTokenHook, TokenStatus, TokenMetadata, AuthError } from '../types/auth';
+import { AuthTokenHook, TokenStatus, TokenMetadata } from '../types/auth';
 
 // Token storage key
 const AUTH_TOKEN_KEY = 'auth_token';
@@ -56,7 +56,7 @@ export function useAuthToken(): AuthTokenHook {
    * @param token - JWT token string
    * @returns Parsed token with expiry information if valid
    */
-  const parseTokenData = (token: string): TokenMetadata | null => {
+  const parseTokenData = useCallback((token: string): TokenMetadata | null => {
     if (!token) return null;
     
     try {
@@ -82,26 +82,26 @@ export function useAuthToken(): AuthTokenHook {
       console.warn('Failed to parse token:', error);
       return null;
     }
-  };
+  }, []);
 
   /**
    * Check if a token is about to expire soon
    * @param expiryTime - Token expiry timestamp
    * @returns Whether the token needs refreshing
    */
-  const isTokenExpiringSoon = (expiryTime: number | null): boolean => {
+  const isTokenExpiringSoon = useCallback((expiryTime: number | null): boolean => {
     if (!expiryTime) return true; // If we don't know expiry, refresh to be safe
     
     // Consider tokens expiring within 5 minutes as "expiring soon"
     const expiryThreshold = 5 * 60 * 1000; // 5 minutes in milliseconds
     return Date.now() + expiryThreshold > expiryTime;
-  };
+  }, []);
 
   /**
    * Handle an invalid or revoked token
    * This will clear local storage and potentially redirect to login
    */
-  const handleInvalidToken = async (): Promise<void> => {
+  const handleInvalidToken = useCallback(async (): Promise<void> => {
     // Clear stored token data
     await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
     setTokenStatus('invalid');
@@ -130,7 +130,7 @@ export function useAuthToken(): AuthTokenHook {
         [{ text: 'OK', onPress: () => router.replace('/(auth)/sign-in') }]
       );
     }
-  };
+  }, [auth, router]);
 
   /**
    * Get a fresh authentication token, either from cache or by refreshing
@@ -204,6 +204,7 @@ export function useAuthToken(): AuthTokenHook {
       const storedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
       if (!storedToken) {
         setTokenStatus('invalid');
+        await handleInvalidToken();
         return false;
       }
       
@@ -217,6 +218,7 @@ export function useAuthToken(): AuthTokenHook {
         // Check if expired
         if (Date.now() > tokenData.expiryTime) {
           setTokenStatus('expired');
+          await handleInvalidToken();
           return false;
         }
       }
@@ -261,7 +263,7 @@ export function useAuthToken(): AuthTokenHook {
       setTokenStatus('invalid');
       return false;
     }
-  }, [getToken, tokenStatus, tokenExpiryTime, parseTokenData, isTokenExpiringSoon]);
+  }, [getToken, tokenStatus, tokenExpiryTime, parseTokenData, isTokenExpiringSoon, handleInvalidToken]);
 
   useEffect(() => {
     // Validate token on mount
@@ -404,7 +406,7 @@ export function useAuthToken(): AuthTokenHook {
       clearTimeout(initialTimer);
       clearInterval(interval);
     };
-  }, [getToken, retryCount, isRefreshing, tokenExpiryTime, tokenStatus, validateToken, lastError, auth, parseTokenData, isTokenExpiringSoon]);
+  }, [getToken, retryCount, isRefreshing, tokenExpiryTime, tokenStatus, validateToken, lastError, auth, parseTokenData, isTokenExpiringSoon, getFreshToken]);
 
   return { 
     getFreshToken,

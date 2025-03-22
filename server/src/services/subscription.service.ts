@@ -1,4 +1,4 @@
-import { db } from '../database';
+import { PooledDatabase } from '../database';
 import { subscriptions } from '../database/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { log } from '../utils/logger.utils';
@@ -126,28 +126,29 @@ export async function verifyAppleReceipt(
 export async function saveSubscription(
   userId: string,
   receiptData: string,
-  verificationResult: VerificationResult
+  verificationResult: VerificationResult,
+  db: PooledDatabase
 ): Promise<number> {
-  const now = new Date();
-  
-  // Prepare subscription data
-  const subscriptionData = {
-    userId,
-    productId: verificationResult.productId || 'unknown',
-    type: verificationResult.type || 'unknown',
-    originalTransactionId: verificationResult.originalTransactionId || 'unknown',
-    transactionId: verificationResult.transactionId || 'unknown',
-    receiptData,
-    environment: verificationResult.environment || 'unknown',
-    isActive: verificationResult.isValid,
-    expiresDate: verificationResult.expiresDate,
-    purchaseDate: verificationResult.purchaseDate || now,
-    lastVerifiedDate: now,
-    createdAt: now,
-    updatedAt: now,
-  };
-  
   try {
+    const now = new Date();
+    
+    // Prepare subscription data
+    const subscriptionData = {
+      userId,
+      productId: verificationResult.productId || 'unknown',
+      type: verificationResult.type || 'unknown',
+      originalTransactionId: verificationResult.originalTransactionId || 'unknown',
+      transactionId: verificationResult.transactionId || 'unknown',
+      receiptData,
+      environment: verificationResult.environment || 'unknown',
+      isActive: verificationResult.isValid,
+      expiresDate: verificationResult.expiresDate,
+      purchaseDate: verificationResult.purchaseDate || now,
+      lastVerifiedDate: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    
     // Check if this transaction already exists
     if (verificationResult.transactionId) {
       const existingSubscription = await db
@@ -180,7 +181,7 @@ export async function saveSubscription(
       
     return result[0].id;
   } catch (error) {
-    log(`Error saving subscription: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    log(`Error checking subscription status: ${error instanceof Error ? error.message : String(error)}`, 'error');
     throw error;
   }
 }
@@ -188,7 +189,7 @@ export async function saveSubscription(
 /**
  * Check if a user has an active subscription
  */
-export async function hasActiveSubscription(userId: string): Promise<{
+export async function hasActiveSubscription(userId: string, db: PooledDatabase): Promise<{
   isActive: boolean;
   expiresDate: Date | null;
   type: string | null;
@@ -245,7 +246,7 @@ export async function hasActiveSubscription(userId: string): Promise<{
       subscriptionId: subscription.id
     };
   } catch (error) {
-    log(`Error checking active subscription: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    log(`Error checking subscription status: ${error instanceof Error ? error.message : String(error)}`, 'error');
     throw error;
   }
 }
@@ -255,7 +256,8 @@ export async function hasActiveSubscription(userId: string): Promise<{
  */
 export async function verifyAndSaveSubscription(
   userId: string,
-  receiptData: string
+  receiptData: string,
+  db: PooledDatabase
 ): Promise<{
   isValid: boolean;
   expiresDate: Date | null;
@@ -276,7 +278,7 @@ export async function verifyAndSaveSubscription(
     }
     
     // Save/update subscription in the database
-    await saveSubscription(userId, receiptData, verificationResult);
+    await saveSubscription(userId, receiptData, verificationResult, db);
     
     return {
       isValid: verificationResult.isValid,

@@ -10,125 +10,81 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { router } from 'expo-router';
-import { useSubscription, SUBSCRIPTION_SKUS } from '../../contexts/SubscriptionContext';
-import { useUsage } from '../../contexts/UsageContext';
-import { useUser } from '../../contexts/UserContext';
+import { useSubscriptionActions } from '../../contexts/SubscriptionActionsContext';
+import { useUsageStats, useSubscriptionStatus } from '../../hooks/useApiQueries';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../styles';
+import { SUBSCRIPTION_SKUS } from '../../types/subscription';
 
 const PaywallScreen: React.FC = () => {
   const {
     subscriptionProducts,
-    isLoading: subscriptionLoading,
-    error,
+    isLoading: actionsLoading,
+    error: actionsError,
     purchaseSubscription,
     restorePurchases,
-    isSubscribed,
-    checkSubscriptionStatus
-  } = useSubscription();
+  } = useSubscriptionActions();
+  const { data: usageStats, isLoading: usageLoading, refetch: refreshUsage } = useUsageStats();
+  const {
+    data: subscriptionStatus,
+    isLoading: statusLoading,
+    refetch: refetchSubscriptionStatus,
+  } = useSubscriptionStatus();
 
-  const { usageStats, refreshUsage, isLoading: usageLoading } = useUsage();
-  const { isLoading: profileLoading } = useUser();
-  
-  // Combine loading states
-  const isLoading = subscriptionLoading || usageLoading || profileLoading;
-
+  const isLoading = actionsLoading || usageLoading || statusLoading;
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState<boolean>(false);
   const [isPurchasing, setIsPurchasing] = useState<boolean>(false);
   const [purchaseSuccess, setPurchaseSuccess] = useState<boolean>(false);
   const [initialLoadDone, setInitialLoadDone] = useState<boolean>(false);
-  
-  // Add a loading timeout to prevent infinite loading
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadInitialData = useCallback(async () => {
     if (!initialLoadDone) {
       try {
-        // Add a timeout to ensure loading eventually stops if there's an issue
-        if (loadingTimeoutRef.current) {
-          clearTimeout(loadingTimeoutRef.current);
-        }
-        
-        loadingTimeoutRef.current = setTimeout(() => {
-          setInitialLoadDone(true);
-        }, 10000); // 10 second timeout
-        
+        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = setTimeout(() => setInitialLoadDone(true), 10000);
         await refreshUsage();
         setInitialLoadDone(true);
-        
-        if (loadingTimeoutRef.current) {
-          clearTimeout(loadingTimeoutRef.current);
-          loadingTimeoutRef.current = null;
-        }
+        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
       } catch (error) {
         console.error('Failed to load initial data:', error);
         setInitialLoadDone(true);
-        
-        if (loadingTimeoutRef.current) {
-          clearTimeout(loadingTimeoutRef.current);
-          loadingTimeoutRef.current = null;
-        }
+        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
       }
     }
-  }, [refreshUsage]);
+  }, [initialLoadDone, refreshUsage]);
 
-  // Clean up timeout on unmount
   useEffect(() => {
     return () => {
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
+      if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
     };
   }, []);
 
   useEffect(() => {
     loadInitialData();
-    
     if (subscriptionProducts.length > 0 && !selectedPlan) {
-      const yearlyPlan = subscriptionProducts.find(
-        (sub) => sub.productId === SUBSCRIPTION_SKUS.YEARLY
-      );
-
-      if (yearlyPlan) {
-        setSelectedPlan(yearlyPlan.productId);
-      } else if (subscriptionProducts.length > 0) {
-        setSelectedPlan(subscriptionProducts[0].productId);
-      }
+      const yearlyPlan = subscriptionProducts.find((sub) => sub.productId === SUBSCRIPTION_SKUS.YEARLY);
+      setSelectedPlan(yearlyPlan ? yearlyPlan.productId : subscriptionProducts[0]?.productId);
     }
-  }, [subscriptionProducts, loadInitialData]);
+  }, [subscriptionProducts, loadInitialData, selectedPlan]);
 
   useEffect(() => {
-    if (isSubscribed && isPurchasing) {
+    if (subscriptionStatus?.isSubscribed && isPurchasing) {
       setPurchaseSuccess(true);
       setIsPurchasing(false);
     }
-  }, [isSubscribed, isPurchasing]);
+  }, [subscriptionStatus, isPurchasing]);
 
   const handlePurchase = async () => {
     if (!selectedPlan) return;
-
     setIsPurchasing(true);
-
     try {
-      // For Android with subscription offers
-      if (Platform.OS === 'android') {
-        const product = subscriptionProducts.find((p) => p.productId === selectedPlan);
-
-        if (product?.subscriptionOfferDetails?.[0]?.offerToken) {
-          const offerToken = product.subscriptionOfferDetails[0].offerToken;
-          await purchaseSubscription(selectedPlan, offerToken);
-        } else {
-          await purchaseSubscription(selectedPlan);
-        }
-      } else {
-        // For iOS
-        await purchaseSubscription(selectedPlan);
-      }
-      
-      // Check if the purchase was successful
-      await checkSubscriptionStatus();
+      const product = Platform.OS === 'android' ? subscriptionProducts.find((p) => p.productId === selectedPlan) : null;
+      const offerToken = product?.subscriptionOfferDetails?.[0]?.offerToken;
+      await purchaseSubscription(selectedPlan, offerToken);
+      await refetchSubscriptionStatus();
     } catch (err) {
       console.error('Purchase error:', err);
       setIsPurchasing(false);
@@ -137,11 +93,9 @@ const PaywallScreen: React.FC = () => {
 
   const handleRestore = async () => {
     setIsRestoring(true);
-
     try {
       await restorePurchases();
-      // Manually check subscription after restore
-      await checkSubscriptionStatus();
+      await refetchSubscriptionStatus();
     } catch (err) {
       console.error('Restore error:', err);
     } finally {
@@ -170,29 +124,19 @@ const PaywallScreen: React.FC = () => {
       <Text style={styles.successMessage}>
         Thank you for subscribing to VibeCheck Premium. You now have unlimited access to all features.
       </Text>
-      <TouchableOpacity
-        style={styles.successButton}
-        onPress={navigateToHome}
-      >
+      <TouchableOpacity style={styles.successButton} onPress={navigateToHome}>
         <Text style={styles.successButtonText}>Continue to App</Text>
       </TouchableOpacity>
     </View>
   );
 
-  // Get a formatted date for the next reset
-  const getFormattedResetDate = () => {
-    if (!usageStats?.resetDate) return 'next month';
-    
-    return new Date(usageStats.resetDate).toLocaleDateString('en-US', {
-      month: 'long',
-      day: 'numeric'
-    });
-  };
+  const getFormattedResetDate = () =>
+    usageStats?.resetDate
+      ? new Date(usageStats.resetDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+      : 'next month';
 
-  const renderUsageStats = () => {
-    if (!usageStats) return null;
-    
-    return (
+  const renderUsageStats = () =>
+    usageStats ? (
       <View style={styles.usageStatsContainer}>
         <View style={styles.usageStat}>
           <Text style={styles.usageStatLabel}>Current Usage</Text>
@@ -200,17 +144,17 @@ const PaywallScreen: React.FC = () => {
             {usageStats.currentUsage}/{usageStats.limit === -1 ? '∞' : usageStats.limit}
           </Text>
         </View>
-        
         <View style={styles.usageStat}>
           <Text style={styles.usageStatLabel}>Remaining</Text>
-          <Text style={[styles.usageStatValue, 
-            (usageStats.remainingConversations === 0) && styles.usageStatValueZero]}>
-            {usageStats.remainingConversations === -1 
-              ? '∞' 
-              : usageStats.remainingConversations}
+          <Text
+            style={[
+              styles.usageStatValue,
+              usageStats.remainingConversations === 0 && styles.usageStatValueZero,
+            ]}
+          >
+            {usageStats.remainingConversations === -1 ? '∞' : usageStats.remainingConversations}
           </Text>
         </View>
-        
         <View style={styles.usageStat}>
           <Text style={styles.usageStatLabel}>Resets</Text>
           <Text style={styles.usageStatValue}>
@@ -218,8 +162,7 @@ const PaywallScreen: React.FC = () => {
           </Text>
         </View>
       </View>
-    );
-  };
+    ) : null;
 
   if (purchaseSuccess) {
     return (
@@ -233,33 +176,23 @@ const PaywallScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
-      
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.closeButton} 
-          onPress={goBack}
-        >
+        <TouchableOpacity style={styles.closeButton} onPress={goBack}>
           <Ionicons name="close" size={28} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Premium Subscription</Text>
       </View>
-
       <ScrollView style={styles.scrollView}>
         <View style={styles.heroSection}>
           <View style={styles.heroIconContainer}>
             <Ionicons name="star" size={80} color="#FFD700" />
           </View>
           <Text style={styles.heroTitle}>Upgrade to Premium</Text>
-          <Text style={styles.heroSubtitle}>
-            Unlock unlimited conversations and premium features
-          </Text>
+          <Text style={styles.heroSubtitle}>Unlock unlimited conversations and premium features</Text>
         </View>
-
         {renderUsageStats()}
-
         <View style={styles.featuresSection}>
           <Text style={styles.sectionTitle}>Premium Features</Text>
-          
           <View style={styles.featureItem}>
             <View style={styles.featureIconContainer}>
               <Ionicons name="infinite-outline" size={24} color="#4CAF50" />
@@ -271,7 +204,6 @@ const PaywallScreen: React.FC = () => {
               </Text>
             </View>
           </View>
-          
           <View style={styles.featureItem}>
             <View style={styles.featureIconContainer}>
               <Ionicons name="analytics-outline" size={24} color="#4CAF50" />
@@ -283,7 +215,6 @@ const PaywallScreen: React.FC = () => {
               </Text>
             </View>
           </View>
-          
           <View style={styles.featureItem}>
             <View style={styles.featureIconContainer}>
               <Ionicons name="cloud-upload-outline" size={24} color="#4CAF50" />
@@ -295,7 +226,6 @@ const PaywallScreen: React.FC = () => {
               </Text>
             </View>
           </View>
-          
           <View style={styles.featureItem}>
             <View style={styles.featureIconContainer}>
               <Ionicons name="sparkles-outline" size={24} color="#4CAF50" />
@@ -308,24 +238,17 @@ const PaywallScreen: React.FC = () => {
             </View>
           </View>
         </View>
-
         <View style={styles.plansSection}>
           <Text style={styles.sectionTitle}>Choose Your Plan</Text>
-          
           {isLoading ? (
             <ActivityIndicator size="large" color="#2196F3" style={styles.loader} />
-          ) : error ? (
-            <Text style={styles.errorText}>
-              Failed to load subscription options. Please try again.
-            </Text>
+          ) : actionsError ? (
+            <Text style={styles.errorText}>Failed to load subscription options. Please try again.</Text>
           ) : (
             subscriptionProducts.map((product) => (
               <TouchableOpacity
                 key={product.productId}
-                style={[
-                  styles.planCard,
-                  selectedPlan === product.productId && styles.selectedPlan,
-                ]}
+                style={[styles.planCard, selectedPlan === product.productId && styles.selectedPlan]}
                 onPress={() => setSelectedPlan(product.productId)}
               >
                 {product.productId === SUBSCRIPTION_SKUS.YEARLY && (
@@ -333,24 +256,17 @@ const PaywallScreen: React.FC = () => {
                     <Text style={styles.bestValueText}>BEST VALUE</Text>
                   </View>
                 )}
-                
                 <View style={styles.planHeader}>
-                  <Text style={styles.planTitle}>
-                    {product.title.replace('(VibeCheck)', '')}
-                  </Text>
+                  <Text style={styles.planTitle}>{product.title.replace('(VibeCheck)', '')}</Text>
                   <View style={styles.priceContainer}>
                     <Text style={styles.priceText}>{product.localizedPrice}</Text>
                     <Text style={styles.periodText}>
-                      {product.productId === SUBSCRIPTION_SKUS.MONTHLY 
-                        ? '/month' 
-                        : '/year'}
+                      {product.productId === SUBSCRIPTION_SKUS.MONTHLY ? '/month' : '/year'}
                     </Text>
                   </View>
                 </View>
-                
                 <Text style={styles.planDescription}>{product.description}</Text>
-                
-                <View 
+                <View
                   style={[
                     styles.radioButton,
                     selectedPlan === product.productId && styles.radioButtonSelected,
@@ -360,7 +276,6 @@ const PaywallScreen: React.FC = () => {
             ))
           )}
         </View>
-        
         <View style={styles.actionsContainer}>
           <TouchableOpacity
             style={[
@@ -374,12 +289,9 @@ const PaywallScreen: React.FC = () => {
             {isPurchasing ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Text style={styles.subscribeButtonText}>
-                Subscribe Now
-              </Text>
+              <Text style={styles.subscribeButtonText}>Subscribe Now</Text>
             )}
           </TouchableOpacity>
-          
           <TouchableOpacity
             style={[styles.restoreButton, isRestoring && styles.loadingButton]}
             onPress={handleRestore}
@@ -388,19 +300,17 @@ const PaywallScreen: React.FC = () => {
             {isRestoring ? (
               <ActivityIndicator color="#2196F3" size="small" />
             ) : (
-              <Text style={styles.restoreButtonText}>
-                Restore Purchases
-              </Text>
+              <Text style={styles.restoreButtonText}>Restore Purchases</Text>
             )}
           </TouchableOpacity>
         </View>
-        
         <Text style={styles.disclaimer}>
-          Payment will be charged to your {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} account at the confirmation of purchase. 
-          Subscription automatically renews unless it is canceled at least 24 hours before the 
-          end of the current period. Your account will be charged for renewal within 24 hours 
-          prior to the end of the current period. You can manage and cancel your subscriptions 
-          by going to your account settings on the {Platform.OS === 'ios' ? 'App Store' : 'Google Play Store'} after purchase.
+          Payment will be charged to your {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} account
+          at the confirmation of purchase. Subscription automatically renews unless it is canceled
+          at least 24 hours before the end of the current period. Your account will be charged for
+          renewal within 24 hours prior to the end of the current period. You can manage and cancel
+          your subscriptions by going to your account settings on the{' '}
+          {Platform.OS === 'ios' ? 'App Store' : 'Google Play Store'} after purchase.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -666,4 +576,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PaywallScreen; 
+export default PaywallScreen;

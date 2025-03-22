@@ -1,4 +1,4 @@
-import { getDbConnection, closeDbConnections } from '../index';
+import { getDbConnection, shutdownDb } from '../index';
 import { log } from '../../utils/logger.utils';
 import { users } from '../schema';
 import { eq, count } from 'drizzle-orm';
@@ -87,7 +87,7 @@ async function testTransactions() {
     throw error;
   } finally {
     // Don't close connections here as it will close the default connection used by the application
-    // await closeDbConnections();
+    await shutdownDb();
   }
 }
 

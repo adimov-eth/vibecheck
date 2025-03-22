@@ -1,68 +1,46 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { useUser } from '../contexts/UserContext';
-import { useSubscription } from '../contexts/SubscriptionContext';
-import { useAuthTokenContext } from '../contexts/AuthTokenContext';
+import { useUserProfile, useSubscriptionStatus } from '../hooks/useApiQueries';
 
 interface UserProfileCardProps {
   onRefresh?: () => void;
 }
 
-export const UserProfileCard: React.FC<UserProfileCardProps> = ({ 
-  onRefresh 
-}) => {
-  const { profile, isLoading, hasError, errorMessage, refreshProfile } = useUser();
-  const { isSubscribed, subscriptionInfo } = useSubscription();
-  const { tokenInitialized } = useAuthTokenContext();
-  
-  // Add state to track loading timeout
+export const UserProfileCard: React.FC<UserProfileCardProps> = ({ onRefresh }) => {
+  const { data: profile, isLoading: profileLoading, error: profileError, refetch: refreshProfile } =
+    useUserProfile();
+  const {
+    data: subscriptionStatus,
+    isLoading: subStatusLoading,
+    error: subStatusError,
+  } = useSubscriptionStatus();
+
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // Set a timeout to prevent indefinite loading
-    if (isLoading && !loadingTimedOut) {
-      loadingTimeoutRef.current = setTimeout(() => {
-        setLoadingTimedOut(true);
-      }, 15000); // 15 second timeout
-    } else if (!isLoading && loadingTimeoutRef.current) {
+    if ((profileLoading || subStatusLoading) && !loadingTimedOut) {
+      loadingTimeoutRef.current = setTimeout(() => setLoadingTimedOut(true), 15000);
+    } else if (!(profileLoading || subStatusLoading) && loadingTimeoutRef.current) {
       clearTimeout(loadingTimeoutRef.current);
-      loadingTimeoutRef.current = null;
       setLoadingTimedOut(false);
     }
-    
     return () => {
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
+      if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
     };
-  }, [isLoading, loadingTimedOut]);
+  }, [profileLoading, subStatusLoading, loadingTimedOut]);
 
   const handleRefresh = () => {
     setLoadingTimedOut(false);
     refreshProfile();
-    if (onRefresh) {
-      onRefresh();
-    }
+    if (onRefresh) onRefresh();
   };
 
-  // Show initialization status if token is not yet initialized
-  if (!tokenInitialized) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator size="small" color="#6366f1" style={styles.loadingIndicator} />
-        <Text style={styles.message}>Initializing authentication...</Text>
-      </View>
-    );
-  }
-
-  // Show loading state with timeout recovery option
-  if (isLoading) {
+  if (profileLoading || subStatusLoading) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#6366f1" />
         <Text style={styles.loadingText}>Loading profile...</Text>
-        
         {loadingTimedOut && (
           <View style={styles.timeoutContainer}>
             <Text style={styles.timeoutText}>Loading is taking longer than expected.</Text>
@@ -75,10 +53,12 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
     );
   }
 
-  if (hasError) {
+  if (profileError || subStatusError) {
     return (
       <View style={styles.container}>
-        <Text style={styles.error}>Error: {errorMessage}</Text>
+        <Text style={styles.error}>
+          Error: {profileError?.message || subStatusError?.message || 'Unknown error'}
+        </Text>
         <TouchableOpacity style={styles.button} onPress={handleRefresh}>
           <Text style={styles.buttonText}>Retry</Text>
         </TouchableOpacity>
@@ -102,16 +82,16 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
           <Text style={styles.refreshText}>Refresh</Text>
         </TouchableOpacity>
       </View>
-      
       <View style={styles.details}>
         <Text style={styles.email}>{profile.email || 'No email'}</Text>
         <View style={styles.subscriptionContainer}>
           <Text style={styles.label}>Subscription:</Text>
-          {isSubscribed ? (
+          {subscriptionStatus?.isSubscribed ? (
             <View style={styles.subscriptionActive}>
               <Text style={styles.subscriptionText}>
-                {subscriptionInfo?.type === 'monthly' ? 'Monthly' : 'Yearly'} 
-                {subscriptionInfo?.expiryDate && ` (Expires: ${new Date(subscriptionInfo.expiryDate).toLocaleDateString()})`}
+                {subscriptionStatus.subscription.type === 'monthly' ? 'Monthly' : 'Yearly'}
+                {subscriptionStatus.subscription.expiresDate &&
+                  ` (Expires: ${new Date(subscriptionStatus.subscription.expiresDate).toLocaleDateString()})`}
               </Text>
             </View>
           ) : (
@@ -227,9 +207,6 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontWeight: '500',
   },
-  loadingIndicator: {
-    marginBottom: 8,
-  },
   timeoutContainer: {
     marginTop: 16,
     alignItems: 'center',
@@ -240,4 +217,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 8,
   },
-}); 
+});

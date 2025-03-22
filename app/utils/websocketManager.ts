@@ -439,17 +439,17 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
   useEffect(() => {
     initializeWebSocket();
     
+    // Capture the subscriptions reference at effect execution time
+    const subscriptionsRef = localSubscriptions.current;
+    
     // Cleanup on unmount
     return () => {
       if (reconnectTimeout.current) {
         clearTimeout(reconnectTimeout.current);
       }
       
-      // Capture the current subscriptions at the time of cleanup to avoid stale references
-      const currentSubscriptions = localSubscriptions.current;
-      
-      // Clear local subscriptions but keep the connection for other components
-      currentSubscriptions.clear();
+      // Use the captured reference from when the effect ran
+      subscriptionsRef.clear();
     };
   }, [wsUrl, initializeWebSocket]);
 

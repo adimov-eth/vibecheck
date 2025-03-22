@@ -1,6 +1,6 @@
 import { audioQueue, gptQueue } from '../queues';
 import { log } from './logger.utils';
-import { db } from '../database';
+import { getDbConnection } from '../database';
 import { audios, conversations } from '../database/schema';
 import { eq } from 'drizzle-orm';
 
@@ -111,64 +111,70 @@ export async function restartGptProcessing(
 ): Promise<boolean> {
   try {
     log(`Restarting GPT processing for conversation: ${conversationId}`);
+    const db = getDbConnection();
+    
+    try {
+      // Get all jobs in the GPT queue
+      const waitingJobs = await gptQueue.getWaiting();
+      const activeJobs = await gptQueue.getActive();
+      const delayedJobs = await gptQueue.getDelayed();
+      const failedJobs = await gptQueue.getFailed();
 
-    // Get all jobs in the GPT queue
-    const waitingJobs = await gptQueue.getWaiting();
-    const activeJobs = await gptQueue.getActive();
-    const delayedJobs = await gptQueue.getDelayed();
-    const failedJobs = await gptQueue.getFailed();
+      // Combine all jobs
+      const allJobs = [
+        ...waitingJobs,
+        ...activeJobs,
+        ...delayedJobs,
+        ...failedJobs,
+      ];
 
-    // Combine all jobs
-    const allJobs = [
-      ...waitingJobs,
-      ...activeJobs,
-      ...delayedJobs,
-      ...failedJobs,
-    ];
-
-    // Find and remove any jobs for this conversation
-    let removed = 0;
-    for (const job of allJobs) {
-      if (job.data.conversationId === conversationId) {
-        await job.remove();
-        removed++;
+      // Find and remove any jobs for this conversation
+      let removed = 0;
+      for (const job of allJobs) {
+        if (job.data.conversationId === conversationId) {
+          await job.remove();
+          removed++;
+        }
       }
-    }
 
-    if (removed > 0) {
+      if (removed > 0) {
+        log(
+          `Removed ${removed} existing GPT jobs for conversation: ${conversationId}`
+        );
+      }
+
+      // Get the conversation to verify it exists
+      const conversation = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .then((rows: typeof conversations.$inferSelect[]) => rows[0]);
+
+      if (!conversation) {
+        log(`Conversation not found: ${conversationId}`, 'error');
+        return false;
+      }
+
+      // Update the conversation status back to 'transcribed' to trigger reprocessing
+      await db
+        .update(conversations)
+        .set({ status: 'transcribed' })
+        .where(eq(conversations.id, conversationId));
+
       log(
-        `Removed ${removed} existing GPT jobs for conversation: ${conversationId}`
+        `Updated conversation status to 'transcribed' for conversation: ${conversationId}`
       );
+
+      // Add a new job to the GPT queue
+      await gptQueue.add('process_gpt', { conversationId });
+
+      log(`Added new GPT job for conversation: ${conversationId}`);
+
+      return true;
+    } finally {
+      // Release the database connection when done
+      db.release();
     }
-
-    // Get the conversation to verify it exists
-    const conversation = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.id, conversationId))
-      .then(rows => rows[0]);
-
-    if (!conversation) {
-      log(`Conversation not found: ${conversationId}`, 'error');
-      return false;
-    }
-
-    // Update the conversation status back to 'transcribed' to trigger reprocessing
-    await db
-      .update(conversations)
-      .set({ status: 'transcribed' })
-      .where(eq(conversations.id, conversationId));
-
-    log(
-      `Updated conversation status to 'transcribed' for conversation: ${conversationId}`
-    );
-
-    // Add a new job to the GPT queue
-    await gptQueue.add('process_gpt', { conversationId });
-
-    log(`Added new GPT job for conversation: ${conversationId}`);
-
-    return true;
   } catch (error) {
     log(
       `Error restarting GPT processing: ${error instanceof Error ? error.message : String(error)}`,
