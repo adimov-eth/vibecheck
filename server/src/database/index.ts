@@ -93,7 +93,7 @@ type PooledDatabase = BunSQLiteDatabase<typeof schema> & {
 // Get a connection from the pool
 export const getDbConnection = (): PooledDatabase => {
   const sqliteDb = pool.acquire();
-  const drizzleDb = drizzle(sqliteDb, { schema }) as PooledDatabase;
+  const drizzleDb = drizzle(sqliteDb, { schema }) as unknown as PooledDatabase;
   
   // Add connection to the drizzle instance
   drizzleDb._sqliteDb = sqliteDb;
