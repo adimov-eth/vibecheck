@@ -27,6 +27,9 @@ interface ClerkAuth {
   sessionId?: string;
 }
 
+// Global tracker for ongoing token operations to prevent duplicate requests
+const globalRefreshPromise: { current: Promise<string> | null } = { current: null };
+
 /**
  * Custom hook for managing authentication tokens
  * Provides methods to get fresh tokens and handles automatic token refreshing
@@ -45,8 +48,7 @@ export function useAuthToken(): AuthTokenHook {
   const [tokenExpiryTime, setTokenExpiryTime] = useState<number | null>(null);
   // For optimization and rate limiting purposes
   const lastRefreshAttempt = useRef<number>(0);
-  // Add a promise ref to track ongoing token refreshes
-  const refreshPromise = useRef<Promise<string> | null>(null);
+  // We don't need a local refreshPromise since we're using a global one
   const router = useRouter();
 
   /**
@@ -96,104 +98,6 @@ export function useAuthToken(): AuthTokenHook {
   };
 
   /**
-   * Get a fresh authentication token, either from cache or by refreshing
-   * Implements rate limiting and prevents concurrent requests
-   */
-  const getFreshToken = useCallback(async (): Promise<string> => {
-    const now = Date.now();
-    
-    // Rate limiting check - don't refresh more than once per 5 seconds
-    const timeSinceLastRefresh = now - lastRefreshAttempt.current;
-    if (isRefreshing && timeSinceLastRefresh < MIN_REFRESH_INTERVAL) {
-      if (refreshPromise.current) {
-        return refreshPromise.current;
-      }
-      throw new Error('Token refresh rate limited');
-    }
-    
-    try {
-      // Update refresh timestamp and status
-      lastRefreshAttempt.current = now;
-      setIsRefreshing(true);
-      
-      // Create a new refresh promise
-      refreshPromise.current = (async () => {
-        // First try to load cached token and validate
-        try {
-          const cachedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-          
-          if (cachedToken) {
-            const tokenData = parseTokenData(cachedToken);
-            
-            // If token exists and is not expired (with 30s buffer), return it
-            if (tokenData && tokenData.expiryTime && tokenData.expiryTime - now > 30000) {
-              setTokenStatus('valid');
-              setTokenExpiryTime(tokenData.expiryTime);
-              // Reset error state on success
-              setLastError(undefined);
-              return cachedToken;
-            }
-          }
-        } catch (cacheError) {
-          console.warn('Error reading cached token:', cacheError);
-        }
-        
-        // If we get here, we need a fresh token
-        try {
-          // Get new token from Clerk
-          const newToken = await getToken();
-          
-          if (newToken) {
-            // Save token to AsyncStorage
-            await AsyncStorage.setItem(AUTH_TOKEN_KEY, newToken);
-            
-            // Parse and set token metadata
-            const tokenData = parseTokenData(newToken);
-            if (tokenData?.expiryTime) {
-              setTokenExpiryTime(tokenData.expiryTime);
-            }
-            
-            setTokenStatus('valid');
-            setRetryCount(0);  // Reset retry count on success
-            setLastError(undefined);
-            
-            return newToken;
-          } else {
-            throw new Error('Failed to get token from auth provider');
-          }
-        } catch (tokenError) {
-          // Increment retry count for exponential backoff
-          setRetryCount((prev) => prev + 1);
-          
-          if (retryCount >= MAX_REFRESH_RETRIES) {
-            setTokenStatus('invalid');
-            handleInvalidToken();
-            throw new Error(
-              `Failed to refresh token after ${MAX_REFRESH_RETRIES} attempts: ${
-                tokenError instanceof Error ? tokenError.message : String(tokenError)
-              }`
-            );
-          }
-          
-          // Rethrow to trigger retry mechanism
-          throw tokenError;
-        }
-      })();
-      
-      return await refreshPromise.current;
-    } catch (error) {
-      const errorMessage = `Token refresh failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-      setLastError(error instanceof Error ? error : new Error(errorMessage));
-      throw error;
-    } finally {
-      setIsRefreshing(false);
-      refreshPromise.current = null;
-    }
-  }, [getToken, parseTokenData, retryCount]);
-
-  /**
    * Handle an invalid or revoked token
    * This will clear local storage and potentially redirect to login
    */
@@ -227,6 +131,49 @@ export function useAuthToken(): AuthTokenHook {
       );
     }
   };
+
+  /**
+   * Get a fresh authentication token, either from cache or by refreshing
+   * Implements rate limiting and prevents concurrent requests
+   */
+  const getFreshToken = useCallback(async (): Promise<string> => {
+    // If there's already a global refresh in progress, reuse it
+    if (globalRefreshPromise.current) {
+      return globalRefreshPromise.current;
+    }
+    
+    // Implement rate limiting
+    const now = Date.now();
+    if (now - lastRefreshAttempt.current < MIN_REFRESH_INTERVAL) {
+      // If we have a cached token and we're being rate limited, use it
+      const cachedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+      if (cachedToken) {
+        return cachedToken;
+      }
+    }
+    
+    // Update last attempt timestamp
+    lastRefreshAttempt.current = now;
+    
+    try {
+      const promise = getToken();
+      globalRefreshPromise.current = promise;
+      
+      const token = await promise;
+      
+      // Cache the token
+      if (token) {
+        await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
+      }
+      
+      return token;
+    } catch (error) {
+      console.error('Failed to get auth token:', error);
+      throw error;
+    } finally {
+      globalRefreshPromise.current = null;
+    }
+  }, [getToken]);
 
   /**
    * Clear any stored authentication token
@@ -263,8 +210,8 @@ export function useAuthToken(): AuthTokenHook {
       // Parse token data
       const tokenData = parseTokenData(storedToken);
       
-      // Update our cache
-      if (tokenData?.expiryTime) {
+      // Update our cache - but only if value has changed
+      if (tokenData?.expiryTime && tokenData.expiryTime !== tokenExpiryTime) {
         setTokenExpiryTime(tokenData.expiryTime);
         
         // Check if expired
@@ -274,19 +221,47 @@ export function useAuthToken(): AuthTokenHook {
         }
       }
       
-      // If we have no expiry data, verify with provider
-      if (!tokenData?.expiryTime) {
-        // This will throw if invalid
-        await getToken();
+      // If we have no expiry data or token is about to expire, verify with provider
+      const shouldVerifyWithProvider = !tokenData?.expiryTime || 
+        (tokenData.expiryTime && isTokenExpiringSoon(tokenData.expiryTime));
+        
+      if (shouldVerifyWithProvider) {
+        try {
+          // This will throw if invalid
+          await getToken();
+          
+          // Only set status if it's changing
+          if (tokenStatus !== 'valid') {
+            setTokenStatus('valid');
+          }
+          return true;
+        } catch (verifyError) {
+          // Check if we can still extract userId from the token
+          // Even with invalid session, the token might contain valid user identification
+          if (tokenData) {
+            console.log('Session validation failed, but token data still available:', verifyError);
+            // We'll mark as valid but log the issue
+            // This matches server behavior of "Session invalid but using userId from token"
+            setTokenStatus('valid');
+            return true;
+          } else {
+            setTokenStatus('invalid');
+            return false;
+          }
+        }
       }
       
-      setTokenStatus('valid');
+      // Only set status if it's changing
+      if (tokenStatus !== 'valid') {
+        setTokenStatus('valid');
+      }
       return true;
     } catch (error) {
+      console.error('Token validation error:', error);
       setTokenStatus('invalid');
       return false;
     }
-  }, [getToken, tokenStatus]);
+  }, [getToken, tokenStatus, tokenExpiryTime, parseTokenData, isTokenExpiringSoon]);
 
   useEffect(() => {
     // Validate token on mount
@@ -296,7 +271,17 @@ export function useAuthToken(): AuthTokenHook {
     
     // Automatically refresh the token on a regular interval with enhanced exponential backoff
     const refreshToken = async (): Promise<void> => {
-      if (isRefreshing) return;
+      // Don't refresh if another refresh is in progress globally
+      if (isRefreshing || globalRefreshPromise.current) return;
+
+      // Implement rate limiting for refresh attempts
+      const now = Date.now();
+      if (now - lastRefreshAttempt.current < MIN_REFRESH_INTERVAL) {
+        return;
+      }
+      
+      // Update last attempt timestamp
+      lastRefreshAttempt.current = now;
 
       try {
         // Don't refresh if not signed in
@@ -320,21 +305,42 @@ export function useAuthToken(): AuthTokenHook {
         
         // Only refresh if token is invalid, expired, or expiring soon
         if (!isTokenValid || (tokenExpiryTime && isTokenExpiringSoon(tokenExpiryTime))) {
-          const newToken = await getToken();
-          
-          if (newToken) {
-            const tokenData = parseTokenData(newToken);
+          try {
+            // Use getFreshToken which handles deduplication
+            const newToken = await getFreshToken();
             
-            await AsyncStorage.setItem(AUTH_TOKEN_KEY, newToken);
+            if (newToken) {
+              const tokenData = parseTokenData(newToken);
+              
+              await AsyncStorage.setItem(AUTH_TOKEN_KEY, newToken);
+              
+              if (tokenData?.expiryTime) {
+                setTokenExpiryTime(tokenData.expiryTime);
+              }
+              
+              setTokenStatus('valid');
+              // Reset retry count on success
+              setRetryCount(0);
+              setLastError(undefined);
+            }
+          } catch (refreshError) {
+            console.warn('Token refresh error in interval:', refreshError);
             
-            if (tokenData?.expiryTime) {
-              setTokenExpiryTime(tokenData.expiryTime);
+            // Check if we can extract user ID at least
+            const cachedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+            if (cachedToken) {
+              const tokenData = parseTokenData(cachedToken);
+              if (tokenData) {
+                // We have token data even if session is invalid
+                // This matches the server's "Session invalid but using userId from token" behavior
+                console.log('Using token with user ID despite session validation failure');
+                // Keep the token as is, don't reset status
+                return;
+              }
             }
             
-            setTokenStatus('valid');
-            // Reset retry count on success
-            setRetryCount(0);
-            setLastError(undefined);
+            // If we can't extract user ID, proceed with normal error handling
+            throw refreshError;
           }
         } else {
           // Token is still valid, no need to retry
@@ -398,7 +404,7 @@ export function useAuthToken(): AuthTokenHook {
       clearTimeout(initialTimer);
       clearInterval(interval);
     };
-  }, [getToken, retryCount, isRefreshing, tokenExpiryTime, tokenStatus, validateToken, lastError, auth]);
+  }, [getToken, retryCount, isRefreshing, tokenExpiryTime, tokenStatus, validateToken, lastError, auth, parseTokenData, isTokenExpiringSoon]);
 
   return { 
     getFreshToken,

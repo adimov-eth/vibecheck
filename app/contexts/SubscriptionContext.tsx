@@ -341,10 +341,21 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
 
   // Update useEffect to check subscription only when profile is loaded and token is initialized
   useEffect(() => {
-    if (profile?.id && isConnected && tokenInitialized) {
-      // Check subscription status when user profile is loaded and connection is established
-      checkSubscriptionStatus();
+    // Skip if we don't have profile ID or token isn't initialized
+    if (!profile?.id || !isConnected || !tokenInitialized) {
+      return;
     }
+
+    // Avoid checking too frequently - add debounce
+    const checkTimeout = setTimeout(() => {
+      checkSubscriptionStatus().catch(err => {
+        console.error('Failed to check subscription status:', err);
+      });
+    }, 1000); // 1 second delay to avoid rapid checks
+
+    return () => {
+      clearTimeout(checkTimeout);
+    };
   }, [profile?.id, isConnected, tokenInitialized]);
 
   // Context value

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -12,6 +12,7 @@ import {
 import { router } from 'expo-router';
 import { useSubscription, SUBSCRIPTION_SKUS } from '../../contexts/SubscriptionContext';
 import { useUsage } from '../../contexts/UsageContext';
+import { useUser } from '../../contexts/UserContext';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, layout } from '../styles';
@@ -19,26 +20,73 @@ import { colors, typography, spacing, layout } from '../styles';
 const PaywallScreen: React.FC = () => {
   const {
     subscriptionProducts,
-    isLoading,
+    isLoading: subscriptionLoading,
     error,
     purchaseSubscription,
     restorePurchases,
     isSubscribed,
+    checkSubscriptionStatus
   } = useSubscription();
 
-  const { usageStats, refreshUsage } = useUsage();
+  const { usageStats, refreshUsage, isLoading: usageLoading } = useUsage();
+  const { profile, isLoading: profileLoading } = useUser();
+  
+  // Combine loading states
+  const isLoading = subscriptionLoading || usageLoading || profileLoading;
 
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState<boolean>(false);
   const [isPurchasing, setIsPurchasing] = useState<boolean>(false);
   const [purchaseSuccess, setPurchaseSuccess] = useState<boolean>(false);
+  const [initialLoadDone, setInitialLoadDone] = useState<boolean>(false);
+  
+  // Add a loading timeout to prevent infinite loading
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Select default plan on load (yearly if available)
+  const loadInitialData = useCallback(async () => {
+    if (!initialLoadDone) {
+      try {
+        // Add a timeout to ensure loading eventually stops if there's an issue
+        if (loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
+        }
+        
+        loadingTimeoutRef.current = setTimeout(() => {
+          setInitialLoadDone(true);
+        }, 10000); // 10 second timeout
+        
+        await refreshUsage();
+        setInitialLoadDone(true);
+        
+        if (loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
+          loadingTimeoutRef.current = null;
+        }
+      } catch (error) {
+        console.error('Failed to load initial data:', error);
+        setInitialLoadDone(true);
+        
+        if (loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
+          loadingTimeoutRef.current = null;
+        }
+      }
+    }
+  }, [refreshUsage]);
+
+  // Clean up timeout on unmount
   useEffect(() => {
-    // Refresh usage stats when screen loads
-    refreshUsage();
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    loadInitialData();
     
-    if (subscriptionProducts.length > 0) {
+    if (subscriptionProducts.length > 0 && !selectedPlan) {
       const yearlyPlan = subscriptionProducts.find(
         (sub) => sub.productId === SUBSCRIPTION_SKUS.YEARLY
       );
@@ -49,9 +97,8 @@ const PaywallScreen: React.FC = () => {
         setSelectedPlan(subscriptionProducts[0].productId);
       }
     }
-  }, [subscriptionProducts, refreshUsage]);
+  }, [subscriptionProducts, loadInitialData]);
 
-  // Check if subscription was successful
   useEffect(() => {
     if (isSubscribed && isPurchasing) {
       setPurchaseSuccess(true);
@@ -79,6 +126,9 @@ const PaywallScreen: React.FC = () => {
         // For iOS
         await purchaseSubscription(selectedPlan);
       }
+      
+      // Check if the purchase was successful
+      await checkSubscriptionStatus();
     } catch (err) {
       console.error('Purchase error:', err);
       setIsPurchasing(false);
@@ -90,6 +140,8 @@ const PaywallScreen: React.FC = () => {
 
     try {
       await restorePurchases();
+      // Manually check subscription after restore
+      await checkSubscriptionStatus();
     } catch (err) {
       console.error('Restore error:', err);
     } finally {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useUser } from '../contexts/UserContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
@@ -14,8 +14,32 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
   const { profile, isLoading, hasError, errorMessage, refreshProfile } = useUser();
   const { isSubscribed, subscriptionInfo } = useSubscription();
   const { tokenInitialized } = useAuthTokenContext();
+  
+  // Add state to track loading timeout
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // Set a timeout to prevent indefinite loading
+    if (isLoading && !loadingTimedOut) {
+      loadingTimeoutRef.current = setTimeout(() => {
+        setLoadingTimedOut(true);
+      }, 15000); // 15 second timeout
+    } else if (!isLoading && loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+      setLoadingTimedOut(false);
+    }
+    
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+    };
+  }, [isLoading, loadingTimedOut]);
 
   const handleRefresh = () => {
+    setLoadingTimedOut(false);
     refreshProfile();
     if (onRefresh) {
       onRefresh();
@@ -32,11 +56,21 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
     );
   }
 
+  // Show loading state with timeout recovery option
   if (isLoading) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#6366f1" />
         <Text style={styles.loadingText}>Loading profile...</Text>
+        
+        {loadingTimedOut && (
+          <View style={styles.timeoutContainer}>
+            <Text style={styles.timeoutText}>Loading is taking longer than expected.</Text>
+            <TouchableOpacity style={styles.button} onPress={handleRefresh}>
+              <Text style={styles.buttonText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   }
@@ -149,6 +183,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 6,
     alignSelf: 'center',
+    marginTop: 12,
   },
   buttonText: {
     color: '#ffffff',
@@ -193,6 +228,16 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   loadingIndicator: {
+    marginBottom: 8,
+  },
+  timeoutContainer: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  timeoutText: {
+    fontSize: 14,
+    color: '#9ca3af',
+    textAlign: 'center',
     marginBottom: 8,
   },
 }); 

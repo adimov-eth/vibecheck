@@ -55,12 +55,11 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
   const clerkAuth = requireAuth({
     // Handle JWT verification failures better
     jwtKey: process.env.CLERK_JWT_KEY,
-    strict: false, // Don't throw on expired sessions, will gracefully fail
     debug: true,   // Enable debug logging
   });
   
   // Apply the Clerk middleware first
-  clerkAuth(req, res, (err) => {
+  clerkAuth(req as any, res as any, (err) => {
     if (err) {
       // Log the error but continue with fallback
       log(`Clerk auth error: ${err.message}`, 'error');

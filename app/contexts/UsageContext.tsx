@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { useApi, UsageStats } from '../hooks/useAPI';
 import { useSubscription } from './SubscriptionContext';
 import { router } from 'expo-router';
@@ -36,14 +36,21 @@ export const UsageProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [error, setError] = useState<Error | null>(null);
   const { getUserUsageStats } = useApi();
   const { isSubscribed } = useSubscription();
+  // Add a ref to track if we're currently refreshing to prevent duplicate calls
+  const isRefreshing = useRef(false);
+  // Track the last refresh time to limit frequency
+  const lastRefreshTime = useRef(0);
   
-  // Fetch usage stats on mount and when subscription changes
-  useEffect(() => {
-    refreshUsage();
-  }, [isSubscribed]);
-  
-  // Function to refresh usage stats
+  // Function to refresh usage stats with proper rate limiting
   const refreshUsage = useCallback(async () => {
+    // Prevent concurrent refreshes and rate limit to once per second
+    const now = Date.now();
+    if (isRefreshing.current || (now - lastRefreshTime.current < 1000)) {
+      return;
+    }
+    
+    isRefreshing.current = true;
+    lastRefreshTime.current = now;
     setIsLoading(true);
     
     try {
@@ -55,8 +62,17 @@ export const UsageProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setError(err instanceof Error ? err : new Error('Failed to fetch usage stats'));
     } finally {
       setIsLoading(false);
+      isRefreshing.current = false;
     }
   }, [getUserUsageStats]);
+  
+  // Fetch usage stats on mount or when subscription changes, but with a more controlled approach
+  useEffect(() => {
+    // Only fetch if we don't have stats yet or subscription status changes
+    if (!usageStats || usageStats.isSubscribed !== isSubscribed) {
+      refreshUsage();
+    }
+  }, [isSubscribed, refreshUsage, usageStats]);
   
   // Format remaining conversations text
   const remainingConversationsText = usageStats 

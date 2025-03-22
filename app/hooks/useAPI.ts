@@ -2,24 +2,17 @@
 import { useCallback, useRef } from 'react';
 import { useAuthToken } from './useAuthToken';
 import { UserProfile, UserProfileResponse } from '../types/user';
+import { ConversationStatus, AnalysisResponse } from '../types/api';
 
 const API_BASE_URL = 'https://v.bkk.lol'; // Replace with your server URL
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 5000; // 5 seconds
 
-export interface AnalysisResponse {
-  summary: string;
-  recommendations: string[];
-  highlights: {
-    partner1: string[];
-    partner2: string[];
-  };
-}
-
-export interface ConversationStatus {
-  status: string;
-  id: string;
-}
+// Global polling tracker to prevent duplicate polling instances
+const activePollingMap = new Map<string, {
+  intervalId: NodeJS.Timeout | null;
+  cancelFn: () => void;
+}>();
 
 export interface SubscriptionStatus {
   isSubscribed: boolean;
@@ -45,7 +38,7 @@ export interface ApiHook {
   createConversation: (id: string, mode: string, recordingType: 'separate' | 'live') => Promise<string>;
   getConversationStatus: (conversationId: string) => Promise<ConversationStatus>;
   getConversationResult: (conversationId: string) => Promise<AnalysisResponse>;
-  pollForResult: (conversationId: string, onComplete: (data: AnalysisResponse) => void) => () => void;
+  pollForResult: (conversationId: string, onProgress?: (progress: number) => void) => Promise<AnalysisResponse>;
   verifySubscriptionReceipt: (receiptData: string) => Promise<SubscriptionStatus>;
   getSubscriptionStatus: () => Promise<SubscriptionStatus>;
   getUserUsageStats: () => Promise<UsageStats>;
@@ -58,6 +51,14 @@ export function useApi(): ApiHook {
   const fetchWithRetry = useCallback(async (url: string, options: RequestInit, retries = 0): Promise<Response> => {
     try {
       const token = await getFreshToken();
+      
+      if (!token) {
+        console.error('Authentication token is empty or invalid');
+        throw new Error('Authentication failed: Invalid token');
+      }
+      
+      console.log(`API request to: ${url.split('/').slice(-2).join('/')}`);
+      
       const response = await fetch(url, {
         ...options,
         headers: {
@@ -66,17 +67,34 @@ export function useApi(): ApiHook {
           ...options.headers,
         },
       });
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Request failed');
+      
+      if (response.status === 401 || response.status === 403) {
+        // Specific authentication error handling
+        console.error(`Authentication error: ${response.status} on ${url.split('/').slice(-2).join('/')}`);
+        throw new Error(`Authentication failed: ${response.statusText}`);
       }
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `Request failed with status ${response.status}`);
+      }
+      
       return response;
     } catch (error) {
+      // Don't retry auth errors to avoid spam
+      if (error instanceof Error && 
+          error.message.includes('Authentication failed') && 
+          retries > 0) {
+        console.error('Authentication error, not retrying:', error.message);
+        throw error;
+      }
+      
       if (retries < MAX_RETRIES) {
         console.log(`Request failed, retrying (${retries + 1}/${MAX_RETRIES}) in ${RETRY_DELAY / 1000} seconds...`);
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
         return fetchWithRetry(url, options, retries + 1);
       }
+      
       console.error('Request failed after retries:', error);
       throw error;
     }
@@ -106,41 +124,125 @@ export function useApi(): ApiHook {
     return await response.json() as AnalysisResponse;
   }, [fetchWithRetry]);
 
-  const pollForResult = useCallback((conversationId: string, onComplete: (data: AnalysisResponse) => void) => {
-    const intervalRef = { current: null as NodeJS.Timeout | null };
-    const pollCount = { current: 0 };
+  const pollForResult = useCallback((conversationId: string, onProgress?: (progress: number) => void) => {
+    // Check for existing polling instance and return the same promise
+    const existingInstance = activePollingMap.get(conversationId);
+    if (existingInstance) {
+      console.log(`Reusing existing polling for conversation: ${conversationId}`);
+      return new Promise<AnalysisResponse>((_, reject) => {
+        // Return already-in-progress polling with a way to cancel
+        reject(new Error('Polling already in progress for this conversation'));
+      });
+    }
+
+    console.log(`Starting new polling for conversation: ${conversationId}`);
     
-    const checkResult = async () => {
-      try {
-        const { status } = await getConversationStatus(conversationId);
-        
-        pollCount.current += 1;
-        if (pollCount.current % 5 === 0) {
-          console.log(`Polling for results (attempt ${pollCount.current})...`);
+    return new Promise<AnalysisResponse>((resolve, reject) => {
+      const intervalRef = { current: null as NodeJS.Timeout | null };
+      const pollCount = { current: 0 };
+      const maxAttempts = 60; // Maximum polling attempts (3 minutes at 3s intervals)
+      let hasResolved = false;
+      
+      // Progress tracking
+      let lastProgressValue = 0;
+      
+      // Function to clean up polling resources
+      const cleanup = () => {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
         }
-        
-        if (status === 'completed') {
-          const result = await getConversationResult(conversationId);
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
+        activePollingMap.delete(conversationId);
+      };
+      
+      // Store in the global map
+      activePollingMap.set(conversationId, {
+        intervalId: null, // Will be set below
+        cancelFn: () => {
+          hasResolved = true;
+          cleanup();
+          reject(new Error('Polling was cancelled'));
+        }
+      });
+      
+      const checkResult = async () => {
+        try {
+          pollCount.current += 1;
+          
+          // Log every 5 attempts to reduce console noise
+          if (pollCount.current % 5 === 0) {
+            console.log(`Polling for results (attempt ${pollCount.current}/${maxAttempts})...`);
           }
-          onComplete(result);
+          
+          // Get conversation status
+          const statusResponse = await getConversationStatus(conversationId);
+          
+          // Update progress
+          if (statusResponse.progress && onProgress && statusResponse.progress > lastProgressValue) {
+            lastProgressValue = statusResponse.progress;
+            onProgress(statusResponse.progress);
+          }
+          
+          // Check status
+          if (statusResponse.status === 'completed') {
+            try {
+              const result = await getConversationResult(conversationId);
+              
+              // Clean up resources
+              cleanup();
+              
+              // Mark as final progress
+              if (onProgress) {
+                onProgress(100);
+              }
+              
+              hasResolved = true;
+              resolve(result);
+            } catch (resultError) {
+              console.error('Error fetching completed result:', resultError);
+              cleanup();
+              hasResolved = true;
+              reject(resultError);
+            }
+          } else if (statusResponse.status === 'error') {
+            // Handle error status from the API
+            cleanup();
+            hasResolved = true;
+            reject(new Error(statusResponse.error || 'Processing failed'));
+          } else if (pollCount.current >= maxAttempts) {
+            // Handle timeout after max attempts
+            cleanup();
+            hasResolved = true;
+            reject(new Error('Polling timed out after maximum attempts'));
+          }
+        } catch (error) {
+          console.error(`Error polling for results (attempt ${pollCount.current}/${maxAttempts}):`, error);
+          
+          // Only reject if we've tried at least 10 times or after all attempts
+          if (pollCount.current >= maxAttempts) {
+            cleanup();
+            if (!hasResolved) {
+              hasResolved = true;
+              reject(error);
+            }
+          }
         }
-      } catch (error) {
-        console.error('Error polling for results:', error);
+      };
+      
+      // Start polling
+      intervalRef.current = setInterval(checkResult, 3000);
+      
+      // Update the interval ID in the global map
+      const instanceData = activePollingMap.get(conversationId);
+      if (instanceData) {
+        instanceData.intervalId = intervalRef.current;
       }
-    };
-    
-    intervalRef.current = setInterval(checkResult, 3000);
-    
-    // Return cleanup function
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
+      
+      // Initial check right away
+      checkResult().catch(error => {
+        console.warn('Initial status check failed:', error);
+      });
+    });
   }, [getConversationStatus, getConversationResult]);
 
   // Verify a subscription receipt with the server
@@ -252,4 +354,29 @@ export function useApi(): ApiHook {
     getUserUsageStats,
     getUserProfile,
   };
+}
+
+export function cancelAllPolling(conversationId?: string): void {
+  if (conversationId) {
+    // Cancel specific polling instance
+    const instance = activePollingMap.get(conversationId);
+    if (instance) {
+      if (instance.intervalId) {
+        clearInterval(instance.intervalId);
+      }
+      instance.cancelFn();
+      activePollingMap.delete(conversationId);
+      console.log(`Cancelled polling for conversation: ${conversationId}`);
+    }
+  } else {
+    // Cancel all polling instances
+    activePollingMap.forEach((instance, id) => {
+      if (instance.intervalId) {
+        clearInterval(instance.intervalId);
+      }
+      instance.cancelFn();
+      console.log(`Cancelled polling for conversation: ${id}`);
+    });
+    activePollingMap.clear();
+  }
 }
