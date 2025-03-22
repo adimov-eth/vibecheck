@@ -79,7 +79,7 @@ let globalWsInstance: {
  * @returns WebSocketManager interface with connection state and methods
  */
 export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHook {
-  const { getAuthToken } = useAuthToken();
+  const { getFreshToken } = useAuthToken();
   const wsUrl = wsUrlOverride || getWebSocketUrl();
   
   const reconnectAttempts = useRef<number>(0);
@@ -122,7 +122,7 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
       setConnectionState('connecting');
       
       // Get authentication token for the connection
-      const token = await getAuthToken();
+      const token = await getFreshToken();
       
       // If token or URL haven't changed and we have an open connection, just reuse it
       if (
@@ -232,7 +232,7 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
       globalWsInstance.instance = null;
       scheduleReconnect();
     }
-  }, [wsUrl, getAuthToken]);
+  }, [wsUrl, getFreshToken]);
 
   /**
    * Schedule a reconnection attempt with exponential backoff
