@@ -1,0 +1,166 @@
+
+> vibecheck@1.0.0 lint
+> expo lint
+
+> pnpm eslint .
+
+/Users/adimov/Developer/vibecheck/app/__tests__/authentication/authToken.test.ts
+   4:33  error    Unable to resolve path to module '@testing-library/react-hooks'  import/no-unresolved
+   6:10  warning  'Alert' is defined but never used                                @typescript-eslint/no-unused-vars
+   8:10  warning  'TokenStatus' is defined but never used                          @typescript-eslint/no-unused-vars
+   8:23  warning  'AuthError' is defined but never used                            @typescript-eslint/no-unused-vars
+  71:11  warning  'mockToken' is assigned a value but never used                   @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/app/(home)/HomeScreen.tsx
+  3:39  warning  'layout' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/app/(home)/RecordingScreen.tsx
+   43:10  warning  'partner2Uri' is assigned a value but never used                 @typescript-eslint/no-unused-vars
+   50:31  warning  'getConversationStatus' is assigned a value but never used       @typescript-eslint/no-unused-vars
+   50:54  warning  'pollForResult' is assigned a value but never used               @typescript-eslint/no-unused-vars
+   52:51  warning  'remainingConversationsText' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  240:9   warning  'handlePremiumFeature' is assigned a value but never used        @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/app/(home)/mode/[id].tsx
+  4:39  warning  'layout' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/app/(home)/paywall.tsx
+   18:18  warning  'typography' is defined but never used                                                                                @typescript-eslint/no-unused-vars
+   18:30  warning  'spacing' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+   18:39  warning  'layout' is defined but never used                                                                                    @typescript-eslint/no-unused-vars
+   32:11  warning  'profile' is assigned a value but never used                                                                          @typescript-eslint/no-unused-vars
+   75:6   warning  React Hook useCallback has a missing dependency: 'initialLoadDone'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  100:6   warning  React Hook useEffect has a missing dependency: 'selectedPlan'. Either include it or remove the dependency array       react-hooks/exhaustive-deps
+
+/Users/adimov/Developer/vibecheck/app/app/styles.ts
+  6:7  warning  'screenHeight' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/app/user.tsx
+  21:11  warning  'userOwnsCredentials' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  23:25  warning  'subscriptionInfo' is assigned a value but never used        @typescript-eslint/no-unused-vars
+  51:9   warning  'handleClearCredentials' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/components/AudioRecordButton.tsx
+   4:18  warning  'layout' is defined but never used                                                                                                                          @typescript-eslint/no-unused-vars
+  62:6   warning  React Hook React.useEffect has missing dependencies: 'buttonScale', 'rippleOpacity', and 'rippleScale'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/adimov/Developer/vibecheck/app/components/AudioWaveform.tsx
+  107:6  warning  React Hook useEffect has missing dependencies: 'barAnims', 'gridOpacityAnim', 'gridShiftAnim', and 'phaseAnim'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/adimov/Developer/vibecheck/app/components/ClearCacheButton.tsx
+  2:28  warning  'View' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/components/Header.tsx
+  2:52  warning  'Image' is defined but never used   @typescript-eslint/no-unused-vars
+  4:39  warning  'layout' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/components/Toggle.tsx
+  2:52  warning  'Animated' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/components/auth/FormField.tsx
+  6:45  warning  'AccessibilityInfo' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/contexts/AuthTokenContext.tsx
+  25:51  warning  'clearToken' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/contexts/RecordingContext.tsx
+    5:10  warning  'useAuthToken' is defined but never used                                                                           @typescript-eslint/no-unused-vars
+  121:6   warning  React Hook useEffect has a missing dependency: 'conversationId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/adimov/Developer/vibecheck/app/contexts/SubscriptionContext.tsx
+   12:3   warning  'getAvailablePurchases' is defined but never used                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+   13:3   warning  'getPurchaseHistory' is defined but never used                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+  102:38  warning  Assignments to the 'purchaseUpdateSubscription' variable from inside React Hook useEffect will be lost after each render. To preserve the value over time, store it in a useRef Hook and keep the mutable value in the '.current' property. Otherwise, you can move this variable directly inside useEffect  react-hooks/exhaustive-deps
+  103:37  warning  Assignments to the 'purchaseErrorSubscription' variable from inside React Hook useEffect will be lost after each render. To preserve the value over time, store it in a useRef Hook and keep the mutable value in the '.current' property. Otherwise, you can move this variable directly inside useEffect   react-hooks/exhaustive-deps
+  359:6   warning  React Hook useEffect has a missing dependency: 'checkSubscriptionStatus'. Either include it or remove the dependency array                                                                                                                                                                                   react-hooks/exhaustive-deps
+
+/Users/adimov/Developer/vibecheck/app/contexts/UserContext.tsx
+    6:28  warning  'UserProfile' is defined but never used                                                                           @typescript-eslint/no-unused-vars
+  173:6   warning  React Hook useEffect has a missing dependency: 'state.profile'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/adimov/Developer/vibecheck/app/hooks/useAPI.ts
+  2:23  warning  'useRef' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/hooks/useAudioRecording.ts
+   22:9   warning  'isUnloadingRef' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  167:22  warning  'err' is defined but never used                      @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/hooks/useAuthToken.ts
+   10:53  warning  'AuthError' is defined but never used                                                                                                                                                                        @typescript-eslint/no-unused-vars
+   59:9   warning  The 'parseTokenData' function makes the dependencies of useCallback Hook (at line 264) change on every render. To fix this, wrap the definition of 'parseTokenData' in its own useCallback() Hook            react-hooks/exhaustive-deps
+   92:9   warning  The 'isTokenExpiringSoon' function makes the dependencies of useCallback Hook (at line 264) change on every render. To fix this, wrap the definition of 'isTokenExpiringSoon' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  104:9   warning  'handleInvalidToken' is assigned a value but never used                                                                                                                                                      @typescript-eslint/no-unused-vars
+  407:6   warning  React Hook useEffect has a missing dependency: 'getFreshToken'. Either include it or remove the dependency array                                                                                             react-hooks/exhaustive-deps
+
+/Users/adimov/Developer/vibecheck/app/hooks/useWebSocketResults.ts
+   57:9  warning  'isWebSocketConnected' is assigned a value but never used                                                                                                 @typescript-eslint/no-unused-vars
+   94:6  warning  React Hook useEffect has missing dependencies: 'fetchResultsImmediately' and 'setProcessingProgress'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  216:6  warning  React Hook useEffect has missing dependencies: 'conversationTopic' and 'setProcessingProgress'. Either include them or remove the dependency array        react-hooks/exhaustive-deps
+
+/Users/adimov/Developer/vibecheck/app/jest/setup.js
+   2:1   error  'jest' is not defined    no-undef
+   3:12  error  'jest' is not defined    no-undef
+   4:12  error  'jest' is not defined    no-undef
+   5:15  error  'jest' is not defined    no-undef
+   6:10  error  'jest' is not defined    no-undef
+  10:1   error  'jest' is not defined    no-undef
+  11:10  error  'jest' is not defined    no-undef
+  12:21  error  'jest' is not defined    no-undef
+  12:35  error  'jest' is not defined    no-undef
+  16:1   error  'jest' is not defined    no-undef
+  17:10  error  'jest' is not defined    no-undef
+  21:1   error  'jest' is not defined    no-undef
+  23:14  error  'jest' is not defined    no-undef
+  28:1   error  'jest' is not defined    no-undef
+  29:12  error  'jest' is not defined    no-undef
+  30:15  error  'jest' is not defined    no-undef
+  31:17  error  'jest' is not defined    no-undef
+  33:14  error  'jest' is not defined    no-undef
+  34:13  error  'jest' is not defined    no-undef
+  35:16  error  'jest' is not defined    no-undef
+  41:1   error  'jest' is not defined    no-undef
+  42:24  error  'jest' is not defined    no-undef
+  44:21  error  'jest' is not defined    no-undef
+  45:19  error  'jest' is not defined    no-undef
+  50:15  error  'jest' is not defined    no-undef
+  50:30  error  'Buffer' is not defined  no-undef
+  51:15  error  'jest' is not defined    no-undef
+  51:30  error  'Buffer' is not defined  no-undef
+  54:1   error  'jest' is not defined    no-undef
+
+/Users/adimov/Developer/vibecheck/app/registerNativeModules.js
+  12:1  warning  Import in body of module; reorder to top  import/first
+
+/Users/adimov/Developer/vibecheck/app/tests/freemium.test.ts
+  8:56  error  Unable to resolve path to module 'vitest'  import/no-unresolved
+
+/Users/adimov/Developer/vibecheck/app/utils/api.ts
+    6:10  warning  'TokenStatus' is defined but never used                      @typescript-eslint/no-unused-vars
+    7:30  warning  'NetworkStatus' is defined but never used                    @typescript-eslint/no-unused-vars
+  213:27  warning  'controller' is assigned a value but never used              @typescript-eslint/no-unused-vars
+  383:19  warning  Array type using 'Array<T>' is forbidden. Use 'T[]' instead  @typescript-eslint/array-type
+
+/Users/adimov/Developer/vibecheck/app/utils/apiClient.ts
+  413:12  warning  Array type using 'Array<T>' is forbidden. Use 'T[]' instead  @typescript-eslint/array-type
+
+/Users/adimov/Developer/vibecheck/app/utils/backgroundUpload.ts
+  4:10  warning  'useAuth' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/utils/error-logger.ts
+  34:1  warning  Import in body of module; reorder to top  import/first
+
+/Users/adimov/Developer/vibecheck/app/utils/network.ts
+  6:33  warning  'NetInfoSubscription' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/utils/offline-auth.ts
+  9:72  warning  'NetworkStatusData' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/adimov/Developer/vibecheck/app/utils/websocketManager.ts
+  235:6   warning  React Hook useCallback has missing dependencies: 'handleIncomingMessage', 'reconnect', 'scheduleReconnect', and 'sendPendingMessages'. Either include them or remove the dependency array                                                                                            react-hooks/exhaustive-deps
+  278:6   warning  React Hook useCallback has a missing dependency: 'sendMessage'. Either include it or remove the dependency array                                                                                                                                                                     react-hooks/exhaustive-deps
+  356:6   warning  React Hook useCallback has a missing dependency: 'storePendingMessage'. Either include it or remove the dependency array                                                                                                                                                             react-hooks/exhaustive-deps
+  424:26  warning  The ref value 'localSubscriptions.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'localSubscriptions.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+✖ 95 problems (31 errors, 64 warnings)
+  0 errors and 4 warnings potentially fixable with the `--fix` option.
+

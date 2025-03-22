@@ -138,6 +138,9 @@ export const createRateLimiter = (
   };
 };
 
+// Define routes that need rate limiting
+type RouteType = 'api' | 'auth' | 'uploads' | 'conversations' | 'audio' | 'subscriptions' | 'usage' | 'users';
+
 // More restrictive limits for API endpoints
 export const apiRateLimiter = createRateLimiter('api', {
   windowMs: 60 * 1000, // 1 minute
@@ -173,4 +176,36 @@ export const conversationsRateLimiter = createRateLimiter('conversations', {
   skip: (req: Request, _res: Response) => {
     return !!(req.userSubscription && req.userSubscription.isActive);
   }
+});
+
+// Add other rate limiters to fix TypeScript errors
+export const audioRateLimiter = createRateLimiter('audio', {
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 20, // 20 audio uploads per 5 minutes
+  message: 'Too many audio uploads, please try again later'
+});
+
+export const subscriptionsRateLimiter = createRateLimiter('subscriptions', {
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 subscription requests per 15 minutes
+  message: 'Too many subscription requests, please try again later'
+});
+
+export const usageRateLimiter = createRateLimiter('usage', {
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 30, // 30 usage requests per 5 minutes
+  message: 'Too many usage requests, please try again later'
+});
+
+export const usersRateLimiter = createRateLimiter('users', {
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // 30 user requests per 15 minutes
+  message: 'Too many user requests, please try again later'
+});
+
+// Default rate limiter as fallback
+export const defaultRateLimiter = createRateLimiter('default', {
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute
+  message: 'Too many requests, please try again later'
 });
