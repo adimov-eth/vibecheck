@@ -24,7 +24,7 @@ router.post('/', (req: any, res: any, next: any) => {
   (async () => {
     try {
       const customReq = req as AuthenticatedRequest;
-      const { id, mode, recordingType } = customReq.body;
+      const { mode, recordingType } = customReq.body;
       const userId = customReq.userId;
       
       if (!userId) {
@@ -57,36 +57,8 @@ router.post('/', (req: any, res: any, next: any) => {
         });
       }
 
-      // Generate a new ID if not provided or check if the provided ID already exists
-      let conversationId = id || uuid();
-
-      if (id) {
-        // Check if conversation with this ID already exists
-        const existingConversation = await customReq.db
-          .select()
-          .from(conversations)
-          .where(eq(conversations.id, id))
-          .then((r: any) => r[0]);
-
-        if (existingConversation) {
-          // If conversation exists, either return it or generate a new ID
-          if (
-            existingConversation.status === 'waiting' &&
-            existingConversation.mode === mode &&
-            existingConversation.recordingType === recordingType &&
-            existingConversation.userId === userId
-          ) {
-            // If it's the same parameters and same user, return the existing conversation ID
-            return res.status(200).json({
-              conversationId: id,
-              note: 'Using existing conversation with this ID',
-            });
-          } else {
-            // Different parameters or different user, generate a new ID instead
-            conversationId = uuid();
-          }
-        }
-      }
+      // Always generate a new UUID on the server, ignoring any client-provided ID
+      const conversationId = uuid();
 
       // Insert the new conversation with user ID
       const now = new Date();

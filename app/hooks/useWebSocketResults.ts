@@ -9,6 +9,7 @@ export interface UseWebSocketResultsReturn {
   processingProgress: number;
   refetchResults: () => void;
   isWebSocketConnected: boolean;
+  audioStatus: Record<number, { status: string; error?: string }>;
 }
 
 /**
@@ -19,6 +20,7 @@ export function useWebSocketResults(conversationId: string | null): UseWebSocket
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [usePollingFallback, setUsePollingFallback] = useState(false);
+  const [audioStatus, setAudioStatus] = useState<Record<number, { status: string; error?: string }>>({});
   
   // Get methods from the recording context
   const { 
@@ -26,7 +28,8 @@ export function useWebSocketResults(conversationId: string | null): UseWebSocket
     setAnalysisResult,
     processingProgress,
     setProcessingProgress,
-    setConversationId
+    setConversationId,
+    updateAudioStatus
   } = useRecording();
   
   // Get API methods for fallback polling
@@ -55,6 +58,34 @@ export function useWebSocketResults(conversationId: string | null): UseWebSocket
   
   // Check if connected to WebSocket
   const isWebSocketConnected = connectionState === 'connected';
+
+  /**
+   * Function to immediately fetch conversation results
+   */
+  const fetchResultsImmediately = useCallback(async (convId: string) => {
+    try {
+      console.log(`Fetching results immediately for ${convId}`);
+      
+      // Fetch the full results
+      const result = await getConversationResult(convId);
+      
+      // Update state
+      setAnalysisResult(result);
+      setProcessingProgress(100);
+      setIsLoading(false);
+      
+      console.log('Results loaded successfully via direct fetch');
+    } catch (err) {
+      // Avoid displaying errors too frequently
+      const now = Date.now();
+      if (now - lastErrorRef.current > 5000) {
+        console.error('Error fetching results:', err);
+        setError('Failed to load results. Tap to retry.');
+        lastErrorRef.current = now;
+      }
+      setIsLoading(false);
+    }
+  }, [getConversationResult, setAnalysisResult, setProcessingProgress]);
 
   /**
    * Handle incoming WebSocket messages
@@ -86,40 +117,47 @@ export function useWebSocketResults(conversationId: string | null): UseWebSocket
         break;
         
       case 'conversation_error':
+      case 'conversation_failed':
         console.error('Error from WebSocket:', lastMessage.payload.error);
         setError(`Processing error: ${lastMessage.payload.error}`);
         setIsLoading(false);
         break;
-    }
-  }, [lastMessage, conversationId, processingProgress]);
 
-  /**
-   * Function to immediately fetch conversation results
-   */
-  const fetchResultsImmediately = useCallback(async (convId: string) => {
-    try {
-      console.log(`Fetching results immediately for ${convId}`);
-      
-      // Fetch the full results
-      const result = await getConversationResult(convId);
-      
-      // Update state
-      setAnalysisResult(result);
-      setProcessingProgress(100);
-      setIsLoading(false);
-      
-      console.log('Results loaded successfully via direct fetch');
-    } catch (err) {
-      // Avoid displaying errors too frequently
-      const now = Date.now();
-      if (now - lastErrorRef.current > 5000) {
-        console.error('Error fetching results:', err);
-        setError('Failed to load results. Tap to retry.');
-        lastErrorRef.current = now;
-      }
-      setIsLoading(false);
+      case 'audio_processed':
+        // Update audio status when transcription is complete
+        const { audioId, status } = lastMessage.payload;
+        console.log(`Audio ${audioId} processing complete with status: ${status}`);
+        
+        // Update local state
+        setAudioStatus(prev => ({
+          ...prev,
+          [audioId]: { status }
+        }));
+        
+        // Also update RecordingContext
+        updateAudioStatus(audioId, { status: 'transcribed' });
+        break;
+        
+      case 'audio_failed':
+        // Handle audio processing failure
+        const failedAudioId = lastMessage.payload.audioId;
+        const errorMessage = lastMessage.payload.error;
+        console.error(`Audio ${failedAudioId} processing failed: ${errorMessage}`);
+        
+        // Update local state
+        setAudioStatus(prev => ({
+          ...prev,
+          [failedAudioId]: { status: 'failed', error: errorMessage }
+        }));
+        
+        // Also update RecordingContext
+        updateAudioStatus(failedAudioId, { 
+          status: 'failed', 
+          error: errorMessage 
+        });
+        break;
     }
-  }, [getConversationResult, setAnalysisResult, setProcessingProgress]);
+  }, [lastMessage, conversationId, processingProgress, updateAudioStatus, fetchResultsImmediately, setProcessingProgress]);
 
   /**
    * Subscribe to conversation updates and verify conversation exists
@@ -213,18 +251,7 @@ export function useWebSocketResults(conversationId: string | null): UseWebSocket
         isFallbackPollingRef.current = false;
       }
     };
-  }, [
-    conversationId, 
-    setConversationId, 
-    getConversationStatus, 
-    isSubscribed, 
-    subscribe, 
-    unsubscribe, 
-    connectionState,
-    analysisResult,
-    fetchResultsImmediately,
-    processingProgress
-  ]);
+  }, [conversationId, setConversationId, getConversationStatus, isSubscribed, subscribe, unsubscribe, connectionState, analysisResult, fetchResultsImmediately, processingProgress, setProcessingProgress, conversationTopic]);
 
   /**
    * Fall back to polling if WebSocket is disconnected
@@ -335,6 +362,7 @@ export function useWebSocketResults(conversationId: string | null): UseWebSocket
     error,
     processingProgress,
     refetchResults,
-    isWebSocketConnected: connectionState === 'connected'
+    isWebSocketConnected,
+    audioStatus
   };
 }

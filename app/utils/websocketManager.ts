@@ -24,6 +24,42 @@ export interface WebSocketMessage {
   topic?: string;
 }
 
+// Define specific WebSocket message types
+export type WebSocketMessageType = 
+  | 'connected'
+  | 'authenticate'
+  | 'subscribe'
+  | 'subscribed'
+  | 'unsubscribe'
+  | 'auth_error'
+  | 'conversation_progress'
+  | 'conversation_completed'
+  | 'conversation_failed'
+  | 'audio_processed'
+  | 'audio_failed'
+  | 'conversation_error';
+
+// Define specific payload types
+export interface AudioProcessedPayload {
+  audioId: number;
+  status: 'transcribed';
+}
+
+export interface AudioFailedPayload {
+  audioId: number;
+  error: string;
+}
+
+export interface ConversationCompletedPayload {
+  conversationId: string;
+  status: 'completed';
+}
+
+export interface ConversationFailedPayload {
+  conversationId: string;
+  error: string;
+}
+
 // Define the WebSocketManager hook return type
 export interface WebSocketManagerHook {
   connectionState: ConnectionState;
@@ -108,8 +144,53 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
     return Math.floor(baseDelay * jitterFactor);
   }, []);
 
+  /**
+   * Global handler for incoming WebSocket messages
+   * Processes different message types and dispatches them appropriately
+   */
+  const handleIncomingMessage = useCallback((message: WebSocketMessage) => {
+    // Skip internal messages like 'subscribed' or 'connected'
+    if (
+      message.type === 'subscribed' || 
+      message.type === 'connected' || 
+      message.type === 'authenticate'
+    ) {
+      return;
+    }
+
+    // Extract the topic and target ID if available
+    let targetId = '';
+    if (message.topic) {
+      const topicParts = message.topic.split(':');
+      if (topicParts.length > 1) {
+        targetId = topicParts[1];
+      }
+    }
+
+    // Handle different message types
+    switch (message.type) {
+      case 'conversation_progress':
+      case 'conversation_completed':
+      case 'conversation_failed':
+        // These are handled by the useWebSocketResults hook
+        console.log(`Received ${message.type} for conversation ${targetId}`);
+        break;
+
+      case 'audio_processed':
+        console.log(`Audio ${message.payload.audioId} has been processed successfully`);
+        break;
+
+      case 'audio_failed':
+        console.error(`Audio ${message.payload.audioId} processing failed: ${message.payload.error}`);
+        break;
+
+      // Handle other message types as needed
+      default:
+        console.log(`Received unhandled WebSocket message type: ${message.type}`);
+    }
+  }, []);
+
   // Pre-declare functions to avoid circular dependencies
-  const handleIncomingMessage = useCallback((message: WebSocketMessage) => {}, []);
   const storePendingMessage = useCallback(async (message: WebSocketMessage) => {}, []);
   const sendPendingMessages = useCallback(async () => {}, []);
   const scheduleReconnect = useCallback(() => {}, []);
@@ -279,22 +360,6 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
   }, [initializeWebSocket]);
 
   /**
-   * Process different types of incoming messages
-   */
-  const handleIncomingMessageImpl = useCallback((message: WebSocketMessage) => {
-    // Let the component handle most message types through the lastMessage state
-    
-    // Special handling for ping messages
-    if (message.type === 'ping') {
-      // Respond to server pings to keep connection alive
-      // We'll handle this in a useEffect to avoid circular dependency
-      if (globalWsInstance.instance && globalWsInstance.instance.readyState === WebSocket.OPEN) {
-        globalWsInstance.instance.send(JSON.stringify({ type: 'pong', payload: {} }));
-      }
-    }
-  }, []);
-
-  /**
    * Store a message in local storage for later transmission
    */
   const storePendingMessageImpl = useCallback(async (message: WebSocketMessage) => {
@@ -350,7 +415,7 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
   }, []);
 
   // Update function implementations after all functions are defined
-  Object.assign(handleIncomingMessage, handleIncomingMessageImpl);
+  // Object.assign(handleIncomingMessage, handleIncomingMessageImpl); // Already defined above
   Object.assign(storePendingMessage, storePendingMessageImpl);
   Object.assign(sendPendingMessages, sendPendingMessagesImpl);
   Object.assign(scheduleReconnect, scheduleReconnectImpl);
@@ -451,7 +516,20 @@ export function useWebSocketManager(wsUrlOverride?: string): WebSocketManagerHoo
       // Use the captured reference from when the effect ran
       subscriptionsRef.clear();
     };
-  }, [wsUrl, initializeWebSocket]);
+  }, [initializeWebSocket]);
+
+  /**
+   * Special processing for ping messages
+   * Separated to avoid circular dependency
+   */
+  useEffect(() => {
+    if (lastMessage && lastMessage.type === 'ping') {
+      // Respond to server pings to keep connection alive
+      if (globalWsInstance.instance && globalWsInstance.instance.readyState === WebSocket.OPEN) {
+        globalWsInstance.instance.send(JSON.stringify({ type: 'pong', payload: {} }));
+      }
+    }
+  }, [lastMessage]);
 
   return {
     connectionState,
