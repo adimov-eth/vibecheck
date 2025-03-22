@@ -1,9 +1,8 @@
 // Updated styles.js with responsive improvements
 import { TextStyle, ViewStyle, Dimensions } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 const screenWidth = width;
-const screenHeight = height;
 
 // Function to calculate responsive sizes
 const scale = (size: number) => (screenWidth / 375) * size;
@@ -23,6 +22,7 @@ export const colors = {
     error: '#FF4D4F',
     success: '#58BD7D',
     info: '#4BC9F0',
+    warning: '#F2C94C',
     shadow: 'rgba(0, 0, 0, 0.08)',
 }
   

@@ -5,8 +5,18 @@
 import { Platform } from 'react-native';
 import * as Application from 'expo-application';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ApiError } from './api';
 import { AuthError } from '../types/auth';
+
+interface ApiError {
+  /** Error code for more specific handling */
+  code: string;
+  /** Error message */
+  message: string;
+  /** HTTP status code if applicable */
+  status?: number;
+  /** Original error if available */
+  originalError?: Error;
+}
 
 // API error class implementation
 export class ApiErrorImpl implements ApiError {

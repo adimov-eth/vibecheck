@@ -10,6 +10,7 @@ export interface UploadHook {
   uploadAudio: (conversationId: string, uris: string | string[]) => Promise<{ success: boolean; audioIds: number[] }>;
   isUploading: boolean;
   isPolling: boolean;
+  pollForStatus: (conversationId: string, onComplete?: () => void) => () => void;
   audioStatus: Record<number, { status: string; error?: string }>;
 }
 
@@ -22,7 +23,7 @@ export function useUpload(): UploadHook {
   const { conversationId } = useRecording();
   
   // Get WebSocket status updates when we have a conversation ID
-  const { audioStatus } = useWebSocketResults(conversationId);
+  const { audioStatus, isWebSocketConnected } = useWebSocketResults(conversationId);
 
   const MAX_RETRIES = 3;
   const RETRY_DELAY = 5000; // 5 seconds
@@ -77,6 +78,57 @@ export function useUpload(): UploadHook {
     }
   }, []);
 
+  // Implementation of pollForStatus that watches audioStatus for completion
+  // This is a simplified polling mechanism that relies on WebSockets when available
+  const pollForStatus = useCallback((conversationId: string, onComplete?: () => void) => {
+    console.log(`Setting up status polling for conversation: ${conversationId}`);
+    
+    // Check if all audio files are processed
+    const checkAudioStatus = () => {
+      // Get all audio statuses for this conversation
+      const statuses = Object.values(audioStatus);
+      
+      if (statuses.length === 0) {
+        return false; // No audio files yet
+      }
+      
+      const allComplete = statuses.every(status => 
+        status.status === 'transcribed' || status.status === 'failed'
+      );
+      
+      if (allComplete) {
+        console.log('All audio processing complete');
+        if (onComplete) onComplete();
+        return true;
+      }
+      
+      return false;
+    };
+    
+    // Do an initial check
+    const isComplete = checkAudioStatus();
+    if (isComplete) {
+      if (onComplete) onComplete();
+      return () => {}; // Return empty cleanup function
+    }
+    
+    // Set up a timer to check periodically if WebSockets are not connected
+    let timer: NodeJS.Timeout | undefined = undefined;
+    
+    if (!isWebSocketConnected) {
+      timer = setInterval(() => {
+        if (checkAudioStatus()) {
+          if (timer) clearInterval(timer);
+        }
+      }, 3000);
+    }
+    
+    // Return cleanup function
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [audioStatus, isWebSocketConnected]);
+
   // Log audio status changes for debugging
   useEffect(() => {
     if (Object.keys(audioStatus).length > 0) {
@@ -97,6 +149,7 @@ export function useUpload(): UploadHook {
     uploadAudio, 
     isUploading, 
     isPolling,
+    pollForStatus,
     audioStatus 
   };
 }

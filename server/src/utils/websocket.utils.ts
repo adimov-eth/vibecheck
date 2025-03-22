@@ -218,15 +218,17 @@ export class WebSocketManager {
             }
             this.clients.get(ws.userId)?.add(ws);
             
-            logger.debug(`WebSocket client authenticated: ${ws.userId}`);
+            logger.info(`WebSocket client authenticated: ${ws.userId} from ${req.headers['x-forwarded-for'] || req.socket.remoteAddress}`);
           }
         } catch (error) {
-          logger.error('WebSocket authentication failed:', error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`WebSocket authentication failed for client from ${req.headers['x-forwarded-for'] || req.socket.remoteAddress}: ${errorMessage}`);
+        logger.debug(`WebSocket auth error details: ${error instanceof Error ? error.stack : 'No stack trace available'}`);
           ws.close(1008, 'Authentication failed');
           return;
         }
       } else {
-        logger.warn('WebSocket connection attempt without token');
+        logger.warn(`WebSocket connection attempt without token from ${req.headers['x-forwarded-for'] || req.socket.remoteAddress}`);
         ws.close(1008, 'Authentication required');
         return;
       }
@@ -234,6 +236,7 @@ export class WebSocketManager {
       // Handle pong messages to keep track of connection status
       ws.on('pong', () => {
         ws.isAlive = true;
+        logger.debug(`WebSocket client ${ws.userId} responded to ping`); 
       });
 
       // Handle messages from clients
@@ -249,7 +252,7 @@ export class WebSocketManager {
                 message: 'Rate limit exceeded. Please slow down your requests.'
               }
             }));
-            logger.warn(`Rate limit exceeded for client ${ws.userId || 'unknown'}`);
+            logger.warn(`Rate limit exceeded for client ${ws.userId || 'unknown'}. Too many messages in window.`);
             return;
           }
           
@@ -258,7 +261,7 @@ export class WebSocketManager {
           if (data.type === 'subscribe' && data.topic && ws.userId) {
             // Add topic to client's subscriptions
             ws.subscriptions.add(data.topic);
-            logger.debug(`Client ${ws.userId} subscribed to ${data.topic}`);
+            logger.info(`Client ${ws.userId} subscribed to topic: ${data.topic}`);
             
             // Confirm subscription
             ws.send(JSON.stringify({
@@ -268,7 +271,7 @@ export class WebSocketManager {
           } else if (data.type === 'unsubscribe' && data.topic) {
             // Remove topic from client's subscriptions
             ws.subscriptions.delete(data.topic);
-            logger.debug(`Client unsubscribed from ${data.topic}`);
+            logger.info(`Client ${ws.userId} unsubscribed from topic: ${data.topic}`);
           } else if (data.type === 'upload_status' && data.topic && data.payload) {
             // Process and forward upload status updates to all subscribers
             const topicParts = data.topic.split(':');
@@ -314,7 +317,9 @@ export class WebSocketManager {
             }
           }
         } catch (error) {
-          logger.error('Error processing WebSocket message:', error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error(`Error processing WebSocket message from user ${ws.userId || 'unknown'}: ${errorMessage}`);
+          logger.debug(`WebSocket error details: ${error instanceof Error ? error.stack : 'No stack trace available'}`);
         }
       });
 
@@ -326,32 +331,42 @@ export class WebSocketManager {
           if (this.clients.get(ws.userId)?.size === 0) {
             this.clients.delete(ws.userId);
           }
-          logger.debug(`WebSocket client disconnected: ${ws.userId}`);
+          const userClientCount = this.clients.get(ws.userId)?.size || 0;
+          logger.info(`WebSocket client disconnected: ${ws.userId}. Remaining connections for this user: ${userClientCount}`);
         }
       });
 
       // Send welcome message
-      ws.send(JSON.stringify({
+      const connectMessage = {
         type: 'connected',
         payload: { 
           message: 'Connected to VibeCheck WebSocket server',
           userId: ws.userId
         }
-      }));
+      };
+      ws.send(JSON.stringify(connectMessage));
+      logger.info(`Welcome message sent to user ${ws.userId}. Connection established successfully.`);
     });
 
     // Set up the ping interval
     this.pingInterval = setInterval(() => {
+      let activeCount = 0;
+      let terminatedCount = 0;
+      
       this.wss?.clients.forEach((ws) => {
         const typedWs = ws as WebSocketClient;
         if (typedWs.isAlive === false) {
-          logger.debug('Terminating inactive WebSocket connection');
+          logger.info(`Terminating inactive WebSocket connection for user: ${typedWs.userId || 'unknown'}`); 
+          terminatedCount++;
           return typedWs.terminate();
         }
         
         typedWs.isAlive = false;
         typedWs.ping();
+        activeCount++;
       });
+      
+      logger.info(`WebSocket health check: ${activeCount} active connections, ${terminatedCount} terminated`);
     }, config.webSocket.pingInterval) as unknown as NodeJS.Timeout;
 
     this.wss.on('close', () => {
@@ -361,7 +376,7 @@ export class WebSocketManager {
       }
     });
 
-    logger.info('WebSocket server setup complete');
+    logger.info(`WebSocket server setup complete on path: ${config.webSocket.path}. Ping interval: ${config.webSocket.pingInterval}ms`);
   }
 
   /**
@@ -387,7 +402,7 @@ export class WebSocketManager {
       }
     });
 
-    logger.debug(`Sent WebSocket message to ${sent} clients for user: ${userId}`);
+    logger.info(`Sent WebSocket message type '${message.type}' to ${sent}/${userClients?.size || 0} clients for user: ${userId}`);
   }
 
   /**
@@ -409,7 +424,11 @@ export class WebSocketManager {
       });
     });
 
-    logger.debug(`Sent WebSocket message to ${sent} clients for conversation: ${conversationId}`);
+    const totalClients = Array.from(this.clients.values()).reduce((acc, clientSet) => acc + clientSet.size, 0);
+    logger.info(`Sent WebSocket message type '${message.type}' to ${sent}/${totalClients} clients for conversation: ${conversationId}`);
+    
+    // Log message payload at debug level for detailed troubleshooting
+    logger.debug(`Message payload for conversation ${conversationId}: ${JSON.stringify(message.payload)}`);
   }
 
   /**
@@ -428,7 +447,11 @@ export class WebSocketManager {
       }
     });
 
-    logger.debug(`Broadcast WebSocket message to ${sent} clients`);
+    const totalClients = this.wss ? this.wss.clients.size : 0;
+    logger.info(`Broadcast WebSocket message type '${message.type}' to ${sent}/${totalClients} clients`);
+    
+    // Log message payload at debug level
+    logger.debug(`Broadcast message payload: ${JSON.stringify(message.payload)}`);
   }
 
   /**

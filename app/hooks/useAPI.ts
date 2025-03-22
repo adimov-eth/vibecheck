@@ -3,8 +3,8 @@ import { useCallback } from 'react';
 import { useAuthToken } from './useAuthToken';
 import { UserProfile, UserProfileResponse } from '../types/user';
 import { ConversationStatus, AnalysisResponse } from '../types/api';
+import { API_ENDPOINTS, API_BASE_URL } from '../utils/apiEndpoints';
 
-const API_BASE_URL = 'https://v.bkk.lol'; // Replace with your server URL
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 5000; // 5 seconds
 
@@ -45,6 +45,34 @@ export interface ApiHook {
   getUserProfile: () => Promise<UserProfile>;
 }
 
+// Custom error class to maintain error categorization
+export class ApiError extends Error {
+  readonly status?: number;
+  readonly code?: string;
+  readonly isAuthError: boolean;
+  readonly isRateLimitError: boolean;
+  readonly isNetworkError: boolean;
+  readonly isServerError: boolean;
+
+  constructor(message: string, options: {
+    status?: number;
+    code?: string;
+    isAuthError?: boolean;
+    isRateLimitError?: boolean;
+    isNetworkError?: boolean;
+    isServerError?: boolean;
+  } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = options.status;
+    this.code = options.code;
+    this.isAuthError = options.isAuthError || false;
+    this.isRateLimitError = options.isRateLimitError || false;
+    this.isNetworkError = options.isNetworkError || false;
+    this.isServerError = options.isServerError || false;
+  }
+}
+
 export function useApi(): ApiHook {
   const { getFreshToken } = useAuthToken();
 
@@ -53,8 +81,10 @@ export function useApi(): ApiHook {
       const token = await getFreshToken();
       
       if (!token) {
-        console.error('Authentication token is empty or invalid');
-        throw new Error('Authentication failed: Invalid token');
+        throw new ApiError('Authentication failed: Invalid token', {
+          isAuthError: true,
+          code: 'AUTH_INVALID_TOKEN'
+        });
       }
       
       const endpoint = url.split('/').slice(-2).join('/');
@@ -69,25 +99,76 @@ export function useApi(): ApiHook {
         },
       });
       
+      // Handle specific HTTP status codes
       if (response.status === 401 || response.status === 403) {
-        // Specific authentication error handling
-        console.error(`Authentication error: ${response.status} on ${endpoint}`);
-        throw new Error(`Authentication failed: ${response.statusText}`);
-      }
-      
-      if (!response.ok) {
+        throw new ApiError(`Authentication failed: ${response.statusText}`, {
+          status: response.status,
+          isAuthError: true,
+          code: 'AUTH_FAILED'
+        });
+      } else if (response.status === 429) {
+        // Rate limit exceeded
+        // Parse the retry-after header if available
+        
+        throw new ApiError('Rate limit exceeded: Please try again later', {
+          status: response.status,
+          isRateLimitError: true,
+          code: 'RATE_LIMIT_EXCEEDED'
+        });
+      } else if (response.status >= 500) {
+        // Server errors
+        throw new ApiError(`Server error: ${response.statusText}`, {
+          status: response.status,
+          isServerError: true,
+          code: 'SERVER_ERROR'
+        });
+      } else if (!response.ok) {
+        // Other client errors
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || `Request failed with status ${response.status}`);
+        throw new ApiError(errorData.error || `Request failed with status ${response.status}`, {
+          status: response.status,
+          code: errorData.code || 'REQUEST_FAILED'
+        });
       }
       
       return response;
     } catch (error) {
-      // Don't retry auth errors to avoid spam
-      if (error instanceof Error && 
-          error.message.includes('Authentication failed') && 
-          retries > 0) {
-        console.error('Authentication error, not retrying:', error.message);
+      // If it's already an ApiError, don't wrap it again
+      if (error instanceof ApiError) {
+        // Handle rate limit errors with appropriate backoff
+        if (error.isRateLimitError && retries < MAX_RETRIES) {
+          const waitTime = 1000 * Math.pow(2, retries); // Exponential backoff
+          console.log(`Rate limit hit, retrying in ${waitTime/1000}s (${retries + 1}/${MAX_RETRIES})...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          return fetchWithRetry(url, options, retries + 1);
+        }
+        
+        // Don't retry auth errors to avoid spam
+        if (error.isAuthError && retries > 0) {
+          console.error('Authentication error, not retrying:', error.message);
+          throw error;
+        }
+        
+        // Handle network errors with retries
+        if (error.isNetworkError && retries < MAX_RETRIES) {
+          const waitTime = RETRY_DELAY * (retries + 1);
+          console.log(`Network error, retrying in ${waitTime/1000}s (${retries + 1}/${MAX_RETRIES})...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          return fetchWithRetry(url, options, retries + 1);
+        }
+        
         throw error;
+      }
+      
+      // Handle fetch network errors (e.g., no internet connection)
+      if (error instanceof TypeError && 
+          (error.message.includes('Network request failed') || 
+           error.message.includes('network error'))) {
+        
+        throw new ApiError('Network connection error. Please check your internet connection.', {
+          isNetworkError: true,
+          code: 'NETWORK_ERROR'
+        });
       }
       
       // For subscription status endpoint, use a longer delay between retries
@@ -101,12 +182,14 @@ export function useApi(): ApiHook {
       }
       
       console.error('Request failed after retries:', error);
-      throw error;
+      throw new ApiError('Request failed after maximum retries', {
+        code: 'MAX_RETRIES_EXCEEDED'
+      });
     }
   }, [getFreshToken]);
 
   const createConversation = useCallback(async (id: string, mode: string, recordingType: 'separate' | 'live') => {
-    const response = await fetchWithRetry(`${API_BASE_URL}/conversations`, {
+    const response = await fetchWithRetry(`${API_BASE_URL}${API_ENDPOINTS.CONVERSATIONS}`, {
       method: 'POST',
       body: JSON.stringify({ id, mode, recordingType }),
     });
@@ -116,14 +199,15 @@ export function useApi(): ApiHook {
   }, [fetchWithRetry]);
 
   const getConversationStatus = useCallback(async (conversationId: string) => {
-    const response = await fetchWithRetry(`${API_BASE_URL}/conversations/${conversationId}`, {
-      method: 'GET',
-    });
+    const response = await fetchWithRetry(
+      `${API_BASE_URL}${API_ENDPOINTS.CONVERSATION_STATUS(conversationId)}`,
+      { method: 'GET' }
+    );
     return await response.json() as ConversationStatus;
   }, [fetchWithRetry]);
 
   const getConversationResult = useCallback(async (conversationId: string) => {
-    const response = await fetchWithRetry(`${API_BASE_URL}/conversations/${conversationId}/result`, {
+    const response = await fetchWithRetry(`${API_BASE_URL}${API_ENDPOINTS.CONVERSATION_RESULT(conversationId)}`, {
       method: 'GET',
     });
     return await response.json() as AnalysisResponse;
@@ -253,7 +337,7 @@ export function useApi(): ApiHook {
   // Verify a subscription receipt with the server
   const verifySubscriptionReceipt = useCallback(async (receiptData: string): Promise<SubscriptionStatus> => {
     try {
-      const response = await fetchWithRetry(`${API_BASE_URL}/subscriptions/verify`, {
+      const response = await fetchWithRetry(`${API_BASE_URL}${API_ENDPOINTS.SUBSCRIPTION_VERIFY}`, {
         method: 'POST',
         body: JSON.stringify({ receiptData }),
       });
@@ -293,7 +377,7 @@ export function useApi(): ApiHook {
       
       console.log('Checking subscription status with fresh token');
       
-      const response = await fetchWithRetry(`${API_BASE_URL}/subscriptions/status`, {
+      const response = await fetchWithRetry(`${API_BASE_URL}${API_ENDPOINTS.SUBSCRIPTION_STATUS}`, {
         method: 'GET',
       }, 0); // Start with 0 retries to get a fresh attempt
       
@@ -321,7 +405,7 @@ export function useApi(): ApiHook {
   // Get user's usage statistics
   const getUserUsageStats = useCallback(async (): Promise<UsageStats> => {
     try {
-      const response = await fetchWithRetry(`${API_BASE_URL}/usage/stats`, {
+      const response = await fetchWithRetry(`${API_BASE_URL}${API_ENDPOINTS.USAGE_STATS}`, {
         method: 'GET',
       });
       
@@ -348,7 +432,7 @@ export function useApi(): ApiHook {
   // Get user profile
   const getUserProfile = useCallback(async (): Promise<UserProfile> => {
     try {
-      const response = await fetchWithRetry(`${API_BASE_URL}/users/me`, {
+      const response = await fetchWithRetry(`${API_BASE_URL}${API_ENDPOINTS.USER_PROFILE}`, {
         method: 'GET',
       });
       

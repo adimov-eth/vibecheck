@@ -16,7 +16,7 @@ import { useUpload, UploadHook } from '../../hooks/useUpload';
 import { useApi, ApiHook } from '../../hooks/useAPI';
 import { useSubscriptionCheck } from '../../hooks/useSubscriptionCheck';
 import { router } from 'expo-router';
-import { useUsage } from '../../contexts/UsageContext';
+import { useUsage } from '../../hooks/useUsage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -40,7 +40,7 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
   const [isProcessing, setIsProcessing] = useState(false);
   const [conversationId, setConversationIdState] = useState<string | null>(null);
   const [partner1Uri, setPartner1Uri] = useState<string | null>(null);
-  const [partner2Uri, setPartner2Uri] = useState<string | null>(null);
+  const [, setPartner2Uri] = useState<string | null>(null);
   const [uploadsComplete, setUploadsComplete] = useState(false);
   const [processingComplete, setProcessingComplete] = useState(false);
 
@@ -48,7 +48,7 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
   const { isRecording, recordingStatus, startRecording, stopRecording, releaseRecordings, hasBeenReleased }: AudioRecordingHook = useAudioRecording();
   const { uploadAudio, pollForStatus, isUploading }: UploadHook = useUpload();
   const { createConversation }: ApiHook = useApi();
-  const { canAccessPremiumFeature } = useSubscriptionCheck();
+  useSubscriptionCheck();
   const { checkCanCreateConversation, usageStats } = useUsage();
 
   // Track whether the cleanup process has already been initiated

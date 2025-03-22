@@ -79,6 +79,9 @@ importers:
       expo-local-authentication:
         specifier: ~15.0.2
         version: 15.0.2(expo@52.0.39(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@expo/metro-runtime@4.0.1(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1)))(react-native-webview@13.12.5(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1))(react@18.3.1))(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1))(react@18.3.1))
+      expo-network:
+        specifier: ~7.0.5
+        version: 7.0.5(expo@52.0.39(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@expo/metro-runtime@4.0.1(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1)))(react-native-webview@13.12.5(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1))(react@18.3.1))(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1))(react@18.3.1))(react@18.3.1)
       expo-router:
         specifier: ~4.0.19
         version: 4.0.19(pih2p5akxdxyydwm4aqnhnlega)
@@ -2953,6 +2956,12 @@ packages:
 
   expo-modules-core@2.2.3:
     resolution: {integrity: sha512-01QqZzpP/wWlxnNly4G06MsOBUTbMDj02DQigZoXfDh80vd/rk3/uVXqnZgOdLSggTs6DnvOgAUy0H2q30XdUg==}
+
+  expo-network@7.0.5:
+    resolution: {integrity: sha512-5dlowKAimhIDN1/lBRnN6SSH6c07f12R3QrfLf3b3GEr6D+EijH2wE537mmwPh1p+254LAkm0Z5ZEXxbwII4sA==}
+    peerDependencies:
+      expo: '*'
+      react: 18.3.1
 
   expo-router@4.0.19:
     resolution: {integrity: sha512-oZ/vAx0x126Q6rccpWkMhKa/17YHYfeXQP8KwqaIadQsTR28cLgAY2gcAtFQyc8XTjgJmsRnfQNyCnyNN04DWg==}
@@ -9567,6 +9576,11 @@ snapshots:
   expo-modules-core@2.2.3:
     dependencies:
       invariant: 2.2.4
+
+  expo-network@7.0.5(expo@52.0.39(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@expo/metro-runtime@4.0.1(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1)))(react-native-webview@13.12.5(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1))(react@18.3.1))(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1))(react@18.3.1))(react@18.3.1):
+    dependencies:
+      expo: 52.0.39(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@expo/metro-runtime@4.0.1(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1)))(react-native-webview@13.12.5(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1))(react@18.3.1))(react-native@0.76.7(@babel/core@7.26.10)(@babel/preset-env@7.26.9(@babel/core@7.26.10))(@react-native-community/cli-server-api@18.0.0)(@types/react@18.3.18)(react@18.3.1))(react@18.3.1)
+      react: 18.3.1
 
   expo-router@4.0.19(pih2p5akxdxyydwm4aqnhnlega):
     dependencies:

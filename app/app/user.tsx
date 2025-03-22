@@ -10,6 +10,7 @@ import { UserProfileCard } from '../components/UserProfileCard';
 import { colors, typography, spacing, layout } from './styles';
 import { useSubscriptionStatus, useUsageStats } from '../hooks/useApiQueries';
 import { useSubscriptionCheck } from '../hooks/useSubscriptionCheck';
+import { UsageStats } from '../types/api';
 
 function Page() {
   const { user } = useClerkUser();
@@ -65,8 +66,9 @@ function Page() {
   };
 
   const getFormattedResetDate = () => {
-    if (!usageStats?.resetDate) return 'next month';
-    return new Date(usageStats.resetDate).toLocaleDateString('en-US', {
+    const stats = usageStats as UsageStats | undefined;
+    if (!stats?.resetDate) return 'next month';
+    return new Date(stats.resetDate).toLocaleDateString('en-US', {
       month: 'long',
       day: 'numeric',
     });
@@ -122,13 +124,19 @@ function Page() {
                   <Text style={styles.subscriptionValue}>
                     {usageLoading
                       ? 'Loading...'
-                      : usageStats && usageStats.remainingConversations !== undefined && usageStats.remainingConversations > 0
-                      ? `${usageStats.remainingConversations} conversations left`
-                      : 'No conversations left'}
+                      : (() => {
+                          const stats = usageStats as UsageStats | undefined;
+                          return stats && typeof stats.remainingConversations === 'number' && stats.remainingConversations > 0
+                            ? `${stats.remainingConversations} conversations left`
+                            : 'No conversations left';
+                        })()}
                   </Text>
-                  {usageStats && usageStats.remainingConversations === 0 && (
-                    <Text style={styles.resetDateText}>Resets on {getFormattedResetDate()}</Text>
-                  )}
+                  {(() => {
+                    const stats = usageStats as UsageStats | undefined;
+                    return stats && typeof stats.remainingConversations === 'number' && stats.remainingConversations === 0 && (
+                      <Text style={styles.resetDateText}>Resets on {getFormattedResetDate()}</Text>
+                    );
+                  })()}
                 </View>
               )}
             </View>
