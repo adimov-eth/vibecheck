@@ -30,8 +30,8 @@ interface Mode {
 interface RecordingScreenProps {
   selectedMode: Mode;
   onGoBack: () => void;
-  onNewRecording: () => void;
-  onRecordingComplete: () => void;
+  onNewRecording?: () => void;
+  onRecordingComplete: (conversationId: string) => void;
 }
 
 export default function RecordingScreen({ selectedMode, onGoBack, onRecordingComplete }: RecordingScreenProps) {
@@ -82,14 +82,14 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
             setUploadsComplete(true);
             // For live mode, navigate to processing screen after successful upload
             setProcessingComplete(true);
-            onRecordingComplete();
+            onRecordingComplete(conversationId!);
           }
         }
       } else if (partner1Uri) {
         // Immediately navigate to the processing screen
         setProcessingComplete(true);
         // Schedule navigation soon after
-        onRecordingComplete();
+        onRecordingComplete(conversationId!);
         
         // Then continue with the processing in the background
         setPartner2Uri(savedUri);
@@ -163,19 +163,19 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
                 
                 // Navigate to results screen only after cleanup
                 console.log('Navigating to results screen');
-                onRecordingComplete();
+                onRecordingComplete(conversationId!);
               })
               .catch(err => {
                 console.error('Error releasing recordings:', err);
                 // Still continue to results even on cleanup error
                 console.log('Error during cleanup, still navigating to results');
-                onRecordingComplete();
+                onRecordingComplete(conversationId!);
               });
           }, 500); // Small delay before cleanup
         } else if (cleanupInitiatedRef.current || hasBeenReleased) {
           // If already cleaned up, just navigate
           console.log('Cleanup already initiated or recordings released, navigating to results');
-          onRecordingComplete();
+          onRecordingComplete(conversationId!);
         }
       });
       

@@ -11,8 +11,10 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSubscription, SUBSCRIPTION_SKUS } from '../../contexts/SubscriptionContext';
+import { useUsage } from '../../contexts/UsageContext';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, typography, spacing, layout } from '../styles';
 
 const PaywallScreen: React.FC = () => {
   const {
@@ -21,14 +23,21 @@ const PaywallScreen: React.FC = () => {
     error,
     purchaseSubscription,
     restorePurchases,
+    isSubscribed,
   } = useSubscription();
+
+  const { usageStats, refreshUsage } = useUsage();
 
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState<boolean>(false);
   const [isPurchasing, setIsPurchasing] = useState<boolean>(false);
+  const [purchaseSuccess, setPurchaseSuccess] = useState<boolean>(false);
 
   // Select default plan on load (yearly if available)
   useEffect(() => {
+    // Refresh usage stats when screen loads
+    refreshUsage();
+    
     if (subscriptionProducts.length > 0) {
       const yearlyPlan = subscriptionProducts.find(
         (sub) => sub.productId === SUBSCRIPTION_SKUS.YEARLY
@@ -40,7 +49,15 @@ const PaywallScreen: React.FC = () => {
         setSelectedPlan(subscriptionProducts[0].productId);
       }
     }
-  }, [subscriptionProducts]);
+  }, [subscriptionProducts, refreshUsage]);
+
+  // Check if subscription was successful
+  useEffect(() => {
+    if (isSubscribed && isPurchasing) {
+      setPurchaseSuccess(true);
+      setIsPurchasing(false);
+    }
+  }, [isSubscribed, isPurchasing]);
 
   const handlePurchase = async () => {
     if (!selectedPlan) return;
@@ -64,7 +81,6 @@ const PaywallScreen: React.FC = () => {
       }
     } catch (err) {
       console.error('Purchase error:', err);
-    } finally {
       setIsPurchasing(false);
     }
   };
@@ -81,6 +97,87 @@ const PaywallScreen: React.FC = () => {
     }
   };
 
+  const goBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(home)');
+    }
+  };
+
+  const navigateToHome = () => {
+    router.replace('/(home)');
+  };
+
+  const renderSuccessView = () => (
+    <View style={styles.successContainer}>
+      <View style={styles.successIconContainer}>
+        <Ionicons name="checkmark-circle" size={80} color={colors.success} />
+      </View>
+      <Text style={styles.successTitle}>Subscription Activated!</Text>
+      <Text style={styles.successMessage}>
+        Thank you for subscribing to VibeCheck Premium. You now have unlimited access to all features.
+      </Text>
+      <TouchableOpacity
+        style={styles.successButton}
+        onPress={navigateToHome}
+      >
+        <Text style={styles.successButtonText}>Continue to App</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Get a formatted date for the next reset
+  const getFormattedResetDate = () => {
+    if (!usageStats?.resetDate) return 'next month';
+    
+    return new Date(usageStats.resetDate).toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const renderUsageStats = () => {
+    if (!usageStats) return null;
+    
+    return (
+      <View style={styles.usageStatsContainer}>
+        <View style={styles.usageStat}>
+          <Text style={styles.usageStatLabel}>Current Usage</Text>
+          <Text style={styles.usageStatValue}>
+            {usageStats.currentUsage}/{usageStats.limit === -1 ? '∞' : usageStats.limit}
+          </Text>
+        </View>
+        
+        <View style={styles.usageStat}>
+          <Text style={styles.usageStatLabel}>Remaining</Text>
+          <Text style={[styles.usageStatValue, 
+            (usageStats.remainingConversations === 0) && styles.usageStatValueZero]}>
+            {usageStats.remainingConversations === -1 
+              ? '∞' 
+              : usageStats.remainingConversations}
+          </Text>
+        </View>
+        
+        <View style={styles.usageStat}>
+          <Text style={styles.usageStatLabel}>Resets</Text>
+          <Text style={styles.usageStatValue}>
+            {usageStats.isSubscribed ? 'Never' : getFormattedResetDate()}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  if (purchaseSuccess) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="dark" />
+        {renderSuccessView()}
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
@@ -88,7 +185,7 @@ const PaywallScreen: React.FC = () => {
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.closeButton} 
-          onPress={() => router.back()}
+          onPress={goBack}
         >
           <Ionicons name="close" size={28} color="#000" />
         </TouchableOpacity>
@@ -102,45 +199,59 @@ const PaywallScreen: React.FC = () => {
           </View>
           <Text style={styles.heroTitle}>Upgrade to Premium</Text>
           <Text style={styles.heroSubtitle}>
-            Unlock all premium features and enhance your experience
+            Unlock unlimited conversations and premium features
           </Text>
         </View>
+
+        {renderUsageStats()}
 
         <View style={styles.featuresSection}>
           <Text style={styles.sectionTitle}>Premium Features</Text>
           
           <View style={styles.featureItem}>
             <View style={styles.featureIconContainer}>
-              <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+              <Ionicons name="infinite-outline" size={24} color="#4CAF50" />
             </View>
             <View style={styles.featureTextContainer}>
-              <Text style={styles.featureTitle}>Unlimited Recordings</Text>
+              <Text style={styles.featureTitle}>Unlimited Conversations</Text>
               <Text style={styles.featureDescription}>
-                Record as many sessions as you need without limitations
+                Create as many conversations as you need without monthly limits
               </Text>
             </View>
           </View>
           
           <View style={styles.featureItem}>
             <View style={styles.featureIconContainer}>
-              <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+              <Ionicons name="analytics-outline" size={24} color="#4CAF50" />
             </View>
             <View style={styles.featureTextContainer}>
-              <Text style={styles.featureTitle}>Enhanced Analysis</Text>
+              <Text style={styles.featureTitle}>Advanced Analysis</Text>
               <Text style={styles.featureDescription}>
-                Get detailed insights and advanced analytics
+                Get deeper insights with more detailed conversation analytics
               </Text>
             </View>
           </View>
           
           <View style={styles.featureItem}>
             <View style={styles.featureIconContainer}>
-              <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+              <Ionicons name="cloud-upload-outline" size={24} color="#4CAF50" />
+            </View>
+            <View style={styles.featureTextContainer}>
+              <Text style={styles.featureTitle}>Cloud Storage</Text>
+              <Text style={styles.featureDescription}>
+                Save all your conversations and access them from any device
+              </Text>
+            </View>
+          </View>
+          
+          <View style={styles.featureItem}>
+            <View style={styles.featureIconContainer}>
+              <Ionicons name="sparkles-outline" size={24} color="#4CAF50" />
             </View>
             <View style={styles.featureTextContainer}>
               <Text style={styles.featureTitle}>Priority Support</Text>
               <Text style={styles.featureDescription}>
-                Get faster responses and dedicated support
+                Get faster responses and dedicated assistance when you need help
               </Text>
             </View>
           </View>
@@ -233,11 +344,11 @@ const PaywallScreen: React.FC = () => {
         </View>
         
         <Text style={styles.disclaimer}>
-          Payment will be charged to your Apple ID account at the confirmation of purchase. 
+          Payment will be charged to your {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} account at the confirmation of purchase. 
           Subscription automatically renews unless it is canceled at least 24 hours before the 
           end of the current period. Your account will be charged for renewal within 24 hours 
           prior to the end of the current period. You can manage and cancel your subscriptions 
-          by going to your account settings on the App Store after purchase.
+          by going to your account settings on the {Platform.OS === 'ios' ? 'App Store' : 'Google Play Store'} after purchase.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -293,6 +404,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
+  },
+  usageStatsContainer: {
+    flexDirection: 'row',
+    backgroundColor: colors.background,
+    margin: 24,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: 'space-between',
+  },
+  usageStat: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  usageStatLabel: {
+    fontSize: 12,
+    color: colors.mediumText,
+    marginBottom: 4,
+  },
+  usageStatValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.darkText,
+  },
+  usageStatValueZero: {
+    color: colors.error,
   },
   sectionTitle: {
     fontSize: 20,
@@ -441,6 +579,38 @@ const styles = StyleSheet.create({
     color: 'red',
     textAlign: 'center',
     marginVertical: 16,
+  },
+  successContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  successIconContainer: {
+    marginBottom: 24,
+  },
+  successTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  successMessage: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  successButton: {
+    backgroundColor: colors.success,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+  },
+  successButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 

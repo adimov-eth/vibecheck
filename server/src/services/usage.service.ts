@@ -1,6 +1,6 @@
 import { db } from '../database';
 import { conversations } from '../database/schema';
-import { eq, and, gte } from 'drizzle-orm';
+import { eq, and, gte, count } from 'drizzle-orm';
 import { log } from '../utils/logger.utils';
 import { hasActiveSubscription } from './subscription.service';
 
@@ -24,15 +24,14 @@ export async function countUserConversationsThisMonth(userId: string): Promise<n
     
     // Query conversations created by the user since the start of the current month
     const result = await db
-      .select({ count: conversations.id })
+      .select({ count: count() })
       .from(conversations)
       .where(
         and(
           eq(conversations.userId, userId),
           gte(conversations.createdAt, monthStart)
         )
-      )
-      .count();
+      );
     
     return result[0]?.count || 0;
   } catch (error) {

@@ -1,12 +1,15 @@
 import { useCallback } from 'react';
 import { Alert, Linking } from 'react-native';
 import { useSubscription } from '../contexts/SubscriptionContext';
+import { useUsage } from '../contexts/UsageContext';
+import { router } from 'expo-router';
 
 /**
  * Hook for checking subscription status and guarding premium features
  */
 export const useSubscriptionCheck = () => {
   const { isSubscribed, subscriptionInfo, checkSubscriptionStatus } = useSubscription();
+  const { usageStats, refreshUsage } = useUsage();
 
   /**
    * Check if user can access premium features
@@ -34,6 +37,8 @@ export const useSubscriptionCheck = () => {
                 onPress: () => {
                   if (onSubscribePress) {
                     onSubscribePress();
+                  } else {
+                    router.push('/paywall' as any);
                   }
                 },
               },
@@ -80,6 +85,39 @@ export const useSubscriptionCheck = () => {
   }, [isSubscribed, subscriptionInfo]);
 
   /**
+   * Get usage statistics for display
+   */
+  const getUsageStats = useCallback(() => {
+    // Refresh usage stats when requested
+    refreshUsage();
+
+    // Format reset date for display
+    const formattedResetDate = usageStats?.resetDate
+      ? new Date(usageStats.resetDate).toLocaleDateString('en-US', {
+          month: 'long',
+          day: 'numeric',
+        })
+      : 'next month';
+
+    return {
+      currentUsage: usageStats?.currentUsage || 0,
+      limit: usageStats?.limit || 10,
+      isSubscribed: usageStats?.isSubscribed || false,
+      remainingConversations: usageStats?.remainingConversations || 0,
+      resetDate: usageStats?.resetDate || null,
+      formattedResetDate,
+      limitReached: usageStats?.remainingConversations === 0 && !usageStats?.isSubscribed,
+      usageText: usageStats?.isSubscribed
+        ? 'Unlimited'
+        : usageStats?.remainingConversations 
+          ? `${usageStats.remainingConversations} left this month`
+          : 'No free conversations left',
+      progressPercentage: usageStats?.limit ? 
+        Math.min(100, (usageStats.currentUsage / usageStats.limit) * 100) : 0
+    };
+  }, [usageStats, refreshUsage]);
+
+  /**
    * Open subscription management in App Store settings
    */
   const openSubscriptionSettings = useCallback(() => {
@@ -91,6 +129,7 @@ export const useSubscriptionCheck = () => {
     subscriptionInfo,
     canAccessPremiumFeature,
     getSubscriptionDetails,
+    getUsageStats,
     openSubscriptionSettings,
   };
 }; 
