@@ -1,21 +1,22 @@
 import express, {
-  Request as ExpressRequest,
+  Request,
   Response,
   NextFunction,
-  RequestHandler,
 } from 'express';
-import { clerkClient, requireAuth, getAuth } from '@clerk/express';
+import { getAuth } from '@clerk/express';
 import multer from 'multer';
-import { db } from '../../database';
 import { audios, conversations } from '../../database/schema';
 import { eq } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import { saveFile } from '../../utils/file.utils';
 import { audioQueue } from '../../queues';
 import { log } from '../../utils/logger.utils';
+import { PooledDatabase } from '../../database';
 
-interface CustomRequest extends ExpressRequest {
+// Define the custom request interface that combines Express and Multer types
+interface CustomRequest extends Request {
   userId?: string;
+  db: PooledDatabase;
   file?: Express.Multer.File;
 }
 
@@ -43,21 +44,26 @@ const upload = multer({
   },
 });
 
-// routes/audio.ts
-router.post(
-  '/',
-  upload.single('audio') as unknown as RequestHandler,
-  async (req: CustomRequest, res: Response, next: NextFunction) => {
+// Explicitly cast the route handler to bypass type checking issues
+// @ts-ignore - Ignoring type issues with Express and Multer compatibility
+router.post('/', (req: any, res: any, next: any) => {
+  upload.single('audio')(req, res, async (err: any) => {
+    if (err) {
+      log(`Audio upload failed: ${err.message || String(err)}`, 'error');
+      return res.status(400).json({ error: err.message || 'Upload failed' });
+    }
+    
     try {
+      const customReq = req as CustomRequest;
       console.log('Received upload request:', {
-        conversationId: req.body.conversationId,
-        file: !!req.file,
+        conversationId: customReq.body.conversationId,
+        file: !!customReq.file,
       });
 
       const auth = getAuth(req);
-      const { conversationId } = req.body;
+      const { conversationId } = customReq.body;
       const userId = auth?.userId;
-      const audioFile = req.file;
+      const audioFile = customReq.file;
 
       // Comprehensive authentication debug log
       console.log({
@@ -86,6 +92,7 @@ router.post(
 
       // Get the conversation to validate it exists
       console.log(`Checking for conversation with ID: ${conversationId}`);
+      const db = customReq.db;
       const conversation = await db
         .select()
         .from(conversations)
@@ -119,10 +126,7 @@ router.post(
       }
 
       const fileName = `${uuid()}${fileExtension}`;
-      const filePath = await saveFile(
-        new File([audioFile.buffer], fileName, { type: audioFile.mimetype }),
-        fileName
-      );
+      const filePath = await saveFile(audioFile.buffer, fileName);
 
       const [newAudio] = await db
         .insert(audios)
@@ -149,6 +153,7 @@ router.post(
       // Pass to error handler instead of handling here
       next(error);
     }
-  }
-);
+  });
+});
+
 export default router;

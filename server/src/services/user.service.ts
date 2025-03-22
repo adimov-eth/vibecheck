@@ -1,19 +1,23 @@
-import { getDbConnection } from '../database';
 import { users } from '../database/schema';
 import { eq } from 'drizzle-orm';
+import { DrizzleDB } from '../database/types';
 import { log } from '../utils/logger.utils';
+
+interface UserData {
+  id: string;
+  email?: string;
+  name?: string;
+}
 
 /**
  * Get user by ID
  */
-export async function getUserById(userId: string) {
-  const db = await getDbConnection();
-  
+export async function getUserById(id: string, db: DrizzleDB) {
   try {
     const result = await db
       .select()
       .from(users)
-      .where(eq(users.id, userId))
+      .where(eq(users.id, id))
       .limit(1);
     
     return result[0] || null;
@@ -26,67 +30,41 @@ export async function getUserById(userId: string) {
 /**
  * Create or update a user
  */
-export async function createOrUpdateUser(userData: {
-  id: string;
-  email?: string;
-  name?: string;
-}) {
-  const db = await getDbConnection();
-  const now = new Date();
+export async function createOrUpdateUser(userData: UserData, db: DrizzleDB) {
+  const { id, email, name } = userData;
   
-  try {
-    // Use transaction for consistency
-    return await db.transaction(async (tx) => {
-      // Check if user exists
-      const existingUserResults = await tx
-        .select()
-        .from(users)
-        .where(eq(users.id, userData.id))
-        .limit(1);
-      
-      const existingUser = existingUserResults[0];
-      
-      if (existingUser) {
-        // Update existing user
-        await tx
-          .update(users)
-          .set({
-            email: userData.email,
-            name: userData.name,
-            updatedAt: now
-          })
-          .where(eq(users.id, userData.id));
-        
-        return { ...existingUser, ...userData, updatedAt: now };
-      } else {
-        // Create new user
-        const newUserData = {
-          id: userData.id,
-          email: userData.email,
-          name: userData.name,
-          createdAt: now,
-          updatedAt: now
-        };
-        
-        await tx
-          .insert(users)
-          .values(newUserData);
-        
-        return newUserData;
-      }
-    });
-  } catch (error) {
-    log(`Error creating or updating user: ${error instanceof Error ? error.message : String(error)}`, 'error');
-    throw error;
+  const existingUser = await getUserById(id, db);
+  
+  if (existingUser) {
+    return db
+      .update(users)
+      .set({
+        email: email || existingUser.email,
+        name: name || existingUser.name,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, id))
+      .returning()
+      .then(r => r[0]);
   }
+  
+  return db
+    .insert(users)
+    .values({
+      id,
+      email: email || null,
+      name: name || null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .returning()
+    .then(r => r[0]);
 }
 
 /**
  * Get all users
  */
-export async function getAllUsers() {
-  const db = await getDbConnection();
-  
+export async function getAllUsers(db: DrizzleDB) {
   try {
     return await db.select().from(users);
   } catch (error) {

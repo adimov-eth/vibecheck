@@ -6,7 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NetInfoState } from '@react-native-community/netinfo';
 import { TokenStatus, TokenMetadata } from '../types/auth';
 import { logError } from './error-logger';
-import { isOnline, setupNetworkListeners as setupBaseNetworkListeners, NetworkStatusData } from './network';
+import { isOnline, setupNetworkListeners as setupBaseNetworkListeners } from './network';
 
 // Constants
 const OFFLINE_AUTH_KEY = 'offline_auth_operations';

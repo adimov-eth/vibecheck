@@ -5,6 +5,7 @@ declare module 'express' {
       userId?: string;
       sessionId?: string;
     };
+    db?: any;
   }
 }
 import { createClerkClient } from '@clerk/backend';
@@ -31,11 +32,14 @@ const syncUserMiddleware = async (req: Request, res: Response, next: NextFunctio
         const clerkUser = await clerk.users.getUser(req.auth.userId);
         
         // Create or update user in our database
-        await createOrUpdateUser({
-          id: req.auth.userId,
-          email: clerkUser.emailAddresses?.[0]?.emailAddress,
-          name: clerkUser.firstName ? `${clerkUser.firstName} ${clerkUser.lastName || ''}`.trim() : undefined
-        });
+        await createOrUpdateUser(
+          {
+            id: req.auth.userId,
+            email: clerkUser.emailAddresses?.[0]?.emailAddress,
+            name: clerkUser.firstName ? `${clerkUser.firstName} ${clerkUser.lastName || ''}`.trim() : undefined
+          },
+          req.db // Pass the db connection from the request
+        );
       } catch (userError) {
         // Log error but continue - don't block the request if user sync fails
         log(`Error syncing user data: ${userError instanceof Error ? userError.message : String(userError)}`, 'error');

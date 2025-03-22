@@ -3,11 +3,19 @@ import path from 'path';
 import { config } from '../config';
 
 export const saveFile = async (
-  file: File,
+  fileData: File | Buffer,
   fileName: string
 ): Promise<string> => {
   const filePath = path.join(config.uploadsDir, fileName);
-  await fs.writeFile(filePath, Buffer.from(await file.arrayBuffer()));
+  
+  if (Buffer.isBuffer(fileData)) {
+    // Handle Node.js Buffer directly
+    await fs.writeFile(filePath, fileData);
+  } else {
+    // Handle browser File object
+    await fs.writeFile(filePath, Buffer.from(await fileData.arrayBuffer()));
+  }
+  
   return filePath;
 };
 

@@ -96,7 +96,7 @@ interface FileUploadOptions {
  * Uses rate limiting, WebSockets, and efficient token management
  */
 export function useApiClient(config?: ApiClientConfig) {
-  const { getAuthToken } = useGlobalAuthToken();
+  const { getFreshToken } = useGlobalAuthToken();
   const baseUrl = config?.baseUrl || API_BASE_URL;
   const wsUrl = getWebSocketUrl(baseUrl);
   
@@ -167,7 +167,7 @@ export function useApiClient(config?: ApiClientConfig) {
     // Add auth token if required
     if (!skipAuth) {
       try {
-        const token = await getAuthToken();
+        const token = await getFreshToken();
         requestHeaders['Authorization'] = `Bearer ${token}`;
       } catch (error) {
         console.error('Failed to get auth token for request:', error);
@@ -208,7 +208,7 @@ export function useApiClient(config?: ApiClientConfig) {
       console.error(`API request failed: ${url}`, error);
       throw error;
     }
-  }, [baseUrl, getAuthToken, config?.defaultHeaders, isWebSocketConnected, subscribe]);
+  }, [baseUrl, getFreshToken, config?.defaultHeaders, isWebSocketConnected, subscribe]);
 
   /**
    * Upload a file to the server
@@ -259,7 +259,7 @@ export function useApiClient(config?: ApiClientConfig) {
     // Add auth token if required
     if (!skipAuth) {
       try {
-        const token = await getAuthToken();
+        const token = await getFreshToken();
         headers['Authorization'] = `Bearer ${token}`;
       } catch (error) {
         console.error('Failed to get auth token for upload:', error);
@@ -323,14 +323,14 @@ export function useApiClient(config?: ApiClientConfig) {
       if (useWebSocket && isWebSocketConnected && formData.conversationId) {
         sendMessage('conversation_upload_error', {
           conversationId: formData.conversationId,
-          error: error.message,
+          error: (error as Error).message,
           timestamp: new Date().toISOString(),
         }, `conversation:${formData.conversationId}`);
       }
       
       throw error;
     }
-  }, [baseUrl, getAuthToken, config?.defaultHeaders, isWebSocketConnected, subscribe, sendMessage]);
+  }, [baseUrl, getFreshToken, config?.defaultHeaders, isWebSocketConnected, subscribe, sendMessage]);
   
   /**
    * Create a rate-limited version of a specific API call
@@ -474,7 +474,7 @@ export function useApiClient(config?: ApiClientConfig) {
         files: fileResults,
       };
     } catch (error) {
-      console.error('Failed to create conversation with files:', error);
+      console.error('Failed to create conversation with files:', (error as Error).message);
       throw error;
     }
   }, [post, uploadFile, isWebSocketConnected, subscribe]);
@@ -493,4 +493,4 @@ export function useApiClient(config?: ApiClientConfig) {
     wsUrl,
     isWebSocketConnected,
   };
-} 
+}

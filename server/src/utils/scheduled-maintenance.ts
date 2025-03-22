@@ -1,5 +1,6 @@
 import { log } from './logger.utils';
 import optimizeDatabase from '../database/migrations/optimize_database';
+import { withDbConnection } from '../database';
 
 // Interval in milliseconds (default: 24 hours)
 const MAINTENANCE_INTERVAL = process.env.MAINTENANCE_INTERVAL_MS 
@@ -37,12 +38,12 @@ async function runMaintenance() {
   try {
     log('Starting scheduled database maintenance...', 'info');
     
-    // Run database optimization
-    await optimizeDatabase();
+    // Run database optimization with a proper database connection
+    await withDbConnection(optimizeDatabase);
     
     log('Scheduled maintenance completed successfully', 'info');
   } catch (error) {
-    log(`Error during scheduled maintenance: ${error}`, 'error');
+    log(`Error during scheduled maintenance: ${error instanceof Error ? error.message : String(error)}`, 'error');
   }
   
   // Schedule the next maintenance run

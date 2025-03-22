@@ -104,7 +104,7 @@ const AudioWaveform: React.FC<AudioWaveformProps> = ({ isActive }) => {
       gridOpacityAnim.setValue(0.1);
       gridShiftAnim.setValue(0);
     }
-  }, [isActive]);
+  }, [barAnims, gridOpacityAnim, gridShiftAnim, isActive, phaseAnim]);
 
   return (
     <View style={styles.waveformContainer} {...panResponder.panHandlers}>

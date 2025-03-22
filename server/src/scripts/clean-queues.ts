@@ -1,44 +1,53 @@
-import { cleanQueues } from '../utils/queue-cleanup';
-import { log } from '../utils/logger.utils';
+import { eq } from "drizzle-orm";
 
-async function main() {
+import { withDbConnection } from "../database";
+import { conversations } from "../database/schema";
+import { gptQueue } from "../queues";
+import { log } from "../utils/logger.utils";
+
+export async function restartGptProcessing(conversationId: string): Promise<boolean> {
   try {
-    // Parse command line arguments
-    const args = process.argv.slice(2);
-    const cleanAudio = !args.includes('--skip-audio');
-    const cleanGpt = !args.includes('--skip-gpt');
+    log(`Restarting GPT processing for conversation: ${conversationId}`);
 
-    // If neither is specified or both are skipped, show usage
-    if ((!cleanAudio && !cleanGpt) || args.includes('--help')) {
-      console.log(`
-Usage: bun src/scripts/clean-queues.ts [options]
+    const waitingJobs = await gptQueue.getWaiting();
+    const activeJobs = await gptQueue.getActive();
+    const delayedJobs = await gptQueue.getDelayed();
+    const failedJobs = await gptQueue.getFailed();
+    const allJobs = [...waitingJobs, ...activeJobs, ...delayedJobs, ...failedJobs];
 
-Options:
-  --skip-audio    Don't clean the audio processing queue
-  --skip-gpt      Don't clean the GPT processing queue
-  --help          Show this help message
-      `);
-      process.exit(0);
+    let removed = 0;
+    for (const job of allJobs) {
+      if (job.data.conversationId === conversationId) {
+        await job.remove();
+        removed++;
+      }
+    }
+    if (removed > 0) log(`Removed ${removed} existing GPT jobs for conversation: ${conversationId}`);
+
+    const conversation = await withDbConnection(async (db) => {
+      return await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .then(rows => rows[0]);
+    });
+    if (!conversation) {
+      log(`Conversation not found: ${conversationId}`, 'error');
+      return false;
     }
 
-    // Clean the queues
-    const result = await cleanQueues(cleanAudio, cleanGpt);
+    await withDbConnection(async (db) => {
+      await db
+        .update(conversations)
+        .set({ status: 'transcribed' })
+        .where(eq(conversations.id, conversationId));
+    });
 
-    // Log the results
-    log('Queue cleanup completed');
-    log(`Removed ${result.audioJobs} jobs from audio queue`);
-    log(`Removed ${result.gptJobs} jobs from GPT queue`);
-
-    // Close the process
-    process.exit(0);
+    await gptQueue.add('process_gpt', { conversationId });
+    log(`Added new GPT job for conversation: ${conversationId}`);
+    return true;
   } catch (error) {
-    log(
-      `Error cleaning queues: ${error instanceof Error ? error.message : String(error)}`,
-      'error'
-    );
-    process.exit(1);
+    log(`Error restarting GPT processing: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    return false;
   }
 }
-
-// Run the script
-main();

@@ -3,7 +3,7 @@
  * Centralized network status checking and monitoring
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo, { NetInfoState, NetInfoSubscription } from '@react-native-community/netinfo';
+import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import { logError } from './error-logger';
 
 // Constants

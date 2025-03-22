@@ -19,7 +19,6 @@ export function useAudioRecording(): AudioRecordingHook {
   const [isPermissionGranted, setIsPermissionGranted] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingStatus, setRecordingStatus] = useState('');
-  const isUnloadingRef = useRef(false);
   const savedRecordingsRef = useRef<Audio.Recording[]>([]);
   const hasBeenReleasedRef = useRef(false);
   // Keep track of release state in state as well for components to check
@@ -166,7 +165,7 @@ export function useAudioRecording(): AudioRecordingHook {
               }
             } catch (err: any) {
               // Skip if already unloaded or in invalid state
-              console.log('Saved recording already unloaded or in invalid state');
+              console.log('Saved recording already unloaded or in invalid state', err);
             }
           }
         } catch (err: any) {

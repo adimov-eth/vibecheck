@@ -1,5 +1,5 @@
 // utils/useApi.ts
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { useAuthToken } from './useAuthToken';
 import { UserProfile, UserProfileResponse } from '../types/user';
 import { ConversationStatus, AnalysisResponse } from '../types/api';

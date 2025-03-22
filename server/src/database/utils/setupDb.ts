@@ -2,28 +2,21 @@ import { log } from '../../utils/logger.utils';
 import addIndexes from '../migrations/add_indexes';
 import optimizeDatabase from '../migrations/optimize_database';
 import testTransactions from './transactionTest';
-import { initializeDb } from '../index';
+import { withDbConnection } from '../index';
 
 async function setupDatabase() {
   try {
     log('Starting database setup...', 'info');
-    
-    // Initialize default database connection first
-    log('Initializing default database connection...', 'info');
-    await initializeDb();
-    
-    // Run migrations
+
     log('Running migrations...', 'info');
-    await addIndexes();
-    
-    // Optimize the database
+    await withDbConnection(addIndexes);
+
     log('Optimizing database...', 'info');
-    await optimizeDatabase();
-    
-    // Test transactions and connection pool
+    await withDbConnection(optimizeDatabase);
+
     log('Testing database connection pool and transactions...', 'info');
     await testTransactions();
-    
+
     log('Database setup completed successfully', 'info');
     return true;
   } catch (error) {
@@ -32,17 +25,11 @@ async function setupDatabase() {
   }
 }
 
-// When this script is executed directly
 if (require.main === module) {
   setupDatabase()
     .then((success) => {
-      if (success) {
-        log('Database setup completed successfully', 'info');
-        process.exit(0);
-      } else {
-        log('Database setup failed', 'error');
-        process.exit(1);
-      }
+      if (success) process.exit(0);
+      else process.exit(1);
     })
     .catch((error) => {
       log(`Unexpected error during database setup: ${error}`, 'error');
@@ -50,4 +37,4 @@ if (require.main === module) {
     });
 }
 
-export default setupDatabase; 
+export default setupDatabase;
