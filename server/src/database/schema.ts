@@ -1,8 +1,17 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
+// User table for storing basic user information
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(), // Clerk user ID
+  email: text('email'),
+  name: text('name'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
 export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => users.id),
   mode: text('mode').notNull(), // "mediator", "counselor", "dinner", "movie"
   recordingType: text('recording_type').notNull(), // "separate" or "live"
   status: text('status').notNull().default('waiting'),
@@ -17,7 +26,7 @@ export const audios = sqliteTable('audios', {
   conversationId: text('conversation_id')
     .notNull()
     .references(() => conversations.id),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => users.id),
   audioFile: text('audio_file'),
   transcription: text('transcription'),
   status: text('status').notNull().default('uploaded'),
@@ -29,7 +38,7 @@ export const audios = sqliteTable('audios', {
 // Table for storing user subscription information
 export const subscriptions = sqliteTable('subscriptions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => users.id),
   productId: text('product_id').notNull(), // e.g., 'com.vibecheck.subscription.monthly'
   type: text('type').notNull(), // 'monthly', 'yearly'
   originalTransactionId: text('original_transaction_id').notNull(),

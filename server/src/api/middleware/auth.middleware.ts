@@ -7,6 +7,8 @@ import { createClerkClient } from '@clerk/backend';
 import { config } from '../../config';
 import { Request, Response, NextFunction } from 'express';
 import { log } from '../../utils/logger.utils';
+import { createOrUpdateUser } from '../../services/user.service';
+
 const clerk = createClerkClient({
   secretKey: process.env.CLERK_SECRET_KEY || config.clerkSecretKey,
 });
@@ -29,6 +31,22 @@ export const authMiddleware = async (
     }
 
     req.userId = session.userId;
+    
+    try {
+      // Get user data from Clerk
+      const clerkUser = await clerk.users.getUser(session.userId);
+      
+      // Create or update user in our database
+      await createOrUpdateUser({
+        id: session.userId,
+        email: clerkUser.emailAddresses?.[0]?.emailAddress,
+        name: clerkUser.firstName ? `${clerkUser.firstName} ${clerkUser.lastName || ''}`.trim() : undefined
+      });
+    } catch (userError) {
+      // Log error but continue - don't block the request if user sync fails
+      log(`Error syncing user data: ${userError instanceof Error ? userError.message : String(userError)}`, 'error');
+    }
+    
     next();
   } catch (error) {
     log(

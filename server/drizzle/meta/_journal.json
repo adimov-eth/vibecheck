@@ -8,6 +8,27 @@
       "when": 1741364975103,
       "tag": "0000_quiet_reptil",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1742615200000,
+      "tag": "0002_subscriptions_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1742615250000,
+      "tag": "0003_add_user_id_to_conversations",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1742615300000,
+      "tag": "0004_add_users_table",
+      "breakpoints": true
     }
   ]
 }
