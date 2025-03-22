@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { View, Text, StyleSheet, BackHandler } from 'react-native';
-import { useResults } from '../../hooks/useResults';
+import { useWebSocketResults } from '../../hooks/useWebSocketResults';
 import { colors } from '../styles';
 import { useRecording } from '../../contexts/RecordingContext';
 import ResultsScreen from '../../components/results/ResultsScreen';
@@ -22,8 +22,19 @@ export default function ResultsPage() {
   const { setConversationId } = useRecording();
   const { validateToken } = useAuthToken();
   
-  // Use our hook to handle loading and errors
-  const { isLoading, error, processingProgress, refetchResults } = useResults(id || null);
+  // Use our WebSocket-enabled hook for real-time updates
+  const { 
+    isLoading, 
+    error, 
+    processingProgress, 
+    refetchResults,
+    isWebSocketConnected 
+  } = useWebSocketResults(id || null);
+  
+  // Log WebSocket connection status
+  useEffect(() => {
+    console.log(`WebSocket connection status: ${isWebSocketConnected ? 'connected' : 'disconnected'}`);
+  }, [isWebSocketConnected]);
 
   // Set up navigation handling
   const handleGoBack = useCallback(() => {
@@ -106,7 +117,12 @@ export default function ResultsPage() {
   // Otherwise render the results screen with error handling
   return (
     <ResultsScreen
-      mode={defaultMode}
+      mode={{
+        ...defaultMode,
+        title: isWebSocketConnected 
+          ? `Results (Live Updates)` 
+          : `Results (Polling)`
+      }}
       isLoading={isLoading}
       processingProgress={processingProgress}
       error={error}
