@@ -14,7 +14,7 @@ const worker = new Worker(
     const db = getDbConnection();
     try {
       const startTime = Date.now();
-      const { audioId } = job.data;
+      const { audioId, conversationId } = job.data;
       log(`Starting audio processing job ${job.id} for audioId: ${audioId}`);
 
       const audio = await db
@@ -22,17 +22,36 @@ const worker = new Worker(
         .from(audios)
         .where(eq(audios.id, audioId))
         .then(r => r[0]);
-      if (!audio) throw new Error('Audio not found');
-
-      await db.update(audios).set({ status: 'processing' }).where(eq(audios.id, audioId));
-
-      const transcription = await transcribeAudio(audio.audioFile!);
-      await deleteFile(audio.audioFile!);
+      
+      if (!audio) {
+        throw new Error(`Audio ${audioId} not found or missing file path`);
+      }
+      
+      if (!audio.audioFile) {
+        throw new Error(`Audio file path is missing for audio ${audioId}`);
+      }
 
       await db
         .update(audios)
-        .set({ transcription, status: 'transcribed', audioFile: null })
+        .set({ status: 'processing', updatedAt: new Date() })
         .where(eq(audios.id, audioId));
+
+      // Transcribe the audio
+      const transcription = await transcribeAudio(audio.audioFile);
+      
+      // Update the database with the transcription
+      await db
+        .update(audios)
+        .set({ 
+          transcription, 
+          status: 'transcribed', 
+          audioFile: null, 
+          updatedAt: new Date() 
+        })
+        .where(eq(audios.id, audioId));
+      
+      // Delete the audio file only after successful transcription and database update
+      await deleteFile(audio.audioFile);
 
       const conversation = await db
         .select()
@@ -45,18 +64,48 @@ const worker = new Worker(
         .from(audios)
         .where(eq(audios.conversationId, audio.conversationId))
         .then(r => r.filter(a => a.status === 'transcribed').length);
+      
       const requiredAudios = conversation.recordingType === 'separate' ? 2 : 1;
 
       if (transcribedCount === requiredAudios) {
         await db
           .update(conversations)
-          .set({ status: 'processing' })
+          .set({ status: 'processing', updatedAt: new Date() })
           .where(eq(conversations.id, audio.conversationId));
-        await gptQueue.add('process_gpt', { conversationId: audio.conversationId });
+        
+        // Add GPT processing job with retry options
+        await gptQueue.add(
+          'process_gpt', 
+          { conversationId: audio.conversationId },
+          {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5000 }
+          }
+        );
       }
 
       const totalDuration = Date.now() - startTime;
       log(`Audio processing job ${job.id} completed in ${totalDuration}ms`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log(`Audio processing failed for job ${job.id}: ${errorMessage}`, 'error');
+      
+      try {
+        // Update audio status to failed
+        await db
+          .update(audios)
+          .set({ 
+            status: 'failed', 
+            errorMessage, 
+            updatedAt: new Date() 
+          })
+          .where(eq(audios.id, job.data.audioId));
+      } catch (dbError) {
+        log(`Failed to update audio status: ${dbError instanceof Error ? dbError.message : String(dbError)}`, 'error');
+      }
+      
+      // Rethrow the error for BullMQ to handle retries
+      throw error;
     } finally {
       db.release();
     }

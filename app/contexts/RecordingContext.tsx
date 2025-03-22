@@ -2,11 +2,15 @@ import React, { createContext, useContext, useState, ReactNode, useCallback, use
 import { cancelAllPolling } from '../hooks/useAPI';
 import type { AnalysisResponse } from '../types/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useAuthToken } from '../hooks/useAuthToken';
 
 interface RecordingData {
   partner1: string;
   partner2?: string;
+}
+
+interface AudioStatus {
+  status: 'uploading' | 'uploaded' | 'processing' | 'transcribed' | 'failed';
+  error?: string;
 }
 
 interface RecordingContextType {
@@ -14,10 +18,12 @@ interface RecordingContextType {
   analysisResult: AnalysisResponse | null;
   conversationId: string | null;
   processingProgress: number;
+  audioStatus: Record<number, AudioStatus>;
   setRecordingData: (data: RecordingData | null) => void;
   setAnalysisResult: (result: AnalysisResponse | null) => void;
   setConversationId: (id: string | null) => void;
   setProcessingProgress: (progress: number) => void;
+  updateAudioStatus: (audioId: number, status: AudioStatus) => void;
   clearRecordings: () => void;
 }
 
@@ -31,6 +37,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResponse | null>(null);
   const [conversationId, setConversationIdState] = useState<string | null>(null);
   const [processingProgress, setProcessingProgressState] = useState<number>(0);
+  const [audioStatus, setAudioStatus] = useState<Record<number, AudioStatus>>({});
 
   // Initialize conversation ID from storage on mount
   useEffect(() => {
@@ -47,6 +54,15 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     };
     
     loadConversationId();
+  }, []);
+
+  // Update audio status
+  const updateAudioStatus = useCallback((audioId: number, status: AudioStatus) => {
+    console.log(`RecordingContext: Updating audio ${audioId} status to ${status.status}`);
+    setAudioStatus(prev => ({
+      ...prev,
+      [audioId]: status
+    }));
   }, []);
 
   // Persist conversation ID to storage when it changes
@@ -82,6 +98,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     setRecordingData(null);
     setAnalysisResult(null);
     setProcessingProgressState(0);
+    setAudioStatus({});
     
     // Reset conversation ID last to ensure cleanup is complete first
     if (conversationId) {
@@ -118,7 +135,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         cancelAllPolling(conversationId);
       }
     };
-  }, []);
+  }, [conversationId]);
 
   return (
     <RecordingContext.Provider 
@@ -127,10 +144,12 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         analysisResult,
         conversationId,
         processingProgress,
+        audioStatus,
         setRecordingData: setRecordingDataCallback,
         setAnalysisResult: setAnalysisResultCallback,
         setConversationId,
         setProcessingProgress,
+        updateAudioStatus,
         clearRecordings: clearRecordingData,
       }}
     >

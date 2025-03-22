@@ -140,7 +140,17 @@ router.post('/', (req: any, res: any, next: any) => {
         })
         .returning();
 
-      await audioQueue.add('process_audio', { audioId: newAudio.id });
+      await audioQueue.add(
+        'process_audio', 
+        { 
+          audioId: newAudio.id,
+          conversationId 
+        },
+        {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 }
+        }
+      );
 
       res
         .status(202)

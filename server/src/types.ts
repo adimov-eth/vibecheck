@@ -26,6 +26,7 @@ export interface Audio {
 }
 export interface AudioJob {
   audioId: number;
+  conversationId: string;
 }
 export interface GptJob {
   conversationId: string;

@@ -25,6 +25,9 @@ import {
   defaultRateLimiter,
 } from './middleware/rate-limit.middleware';
 import { dbMiddleware } from './middleware/db.middleware';
+import { audioQueue, gptQueue } from '../queues';
+import { Job } from 'bullmq';
+import { AudioJob, GptJob } from '../types';
 
 dotenv.config();
 
@@ -86,6 +89,47 @@ export const createApp = () => {
   if (config.webSocket.enabled) {
     websocketManager.initialize(server);
     logger.info('WebSocket server initialized');
+    
+    // Set up queue listeners for real-time updates
+    // @ts-ignore: BullMQ's event typing is problematic
+    audioQueue.on('completed', (job: Job<AudioJob>) => {
+      const { audioId, conversationId } = job.data;
+      websocketManager.sendToConversation(conversationId, {
+        type: 'audio_processed',
+        payload: { audioId, status: 'transcribed' },
+      });
+      logger.info(`Sent WebSocket notification for audio ${audioId} in conversation ${conversationId}`);
+    });
+    
+    // @ts-ignore: BullMQ's event typing is problematic
+    audioQueue.on('failed', (job: Job<AudioJob>, err: Error) => {
+      const { audioId, conversationId } = job.data;
+      websocketManager.sendToConversation(conversationId, {
+        type: 'audio_failed',
+        payload: { audioId, error: err.message },
+      });
+      logger.error(`Sent WebSocket notification for failed audio ${audioId} in conversation ${conversationId}: ${err.message}`);
+    });
+    
+    // @ts-ignore: BullMQ's event typing is problematic
+    gptQueue.on('completed', (job: Job<GptJob>) => {
+      const { conversationId } = job.data;
+      websocketManager.sendToConversation(conversationId, {
+        type: 'conversation_completed',
+        payload: { conversationId, status: 'completed' },
+      });
+      logger.info(`Sent WebSocket notification for completed conversation ${conversationId}`);
+    });
+    
+    // @ts-ignore: BullMQ's event typing is problematic
+    gptQueue.on('failed', (job: Job<GptJob>, err: Error) => {
+      const { conversationId } = job.data;
+      websocketManager.sendToConversation(conversationId, {
+        type: 'conversation_failed',
+        payload: { conversationId, error: err.message },
+      });
+      logger.error(`Sent WebSocket notification for failed conversation ${conversationId}: ${err.message}`);
+    });
   }
 
   return server;
