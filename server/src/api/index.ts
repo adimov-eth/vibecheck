@@ -4,6 +4,8 @@ import { errorHandler } from './middleware/error.middleware';
 import authRoutes from './routes/auth.routes';
 import conversationRoutes from './routes/conversation.routes';
 import audioRoutes from './routes/audio.routes';
+import subscriptionRoutes from './routes/subscription.routes';
+import usageRoutes from './routes/usage.routes';
 import { config } from '../config';
 import { clerkMiddleware, requireAuth, getAuth } from '@clerk/express';
 
@@ -36,6 +38,8 @@ export const createApp = () => {
   app.use('/auth', authRoutes);
   app.use('/conversations', clerkAuth, conversationRoutes);
   app.use('/audio', clerkAuth, audioRoutes);
+  app.use('/subscriptions', subscriptionRoutes);
+  app.use('/usage', clerkAuth, usageRoutes);
 
   app.use((req, res, next) => {
     res.status(404).json({
