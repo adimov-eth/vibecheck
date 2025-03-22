@@ -22,6 +22,8 @@ import {
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useApi } from '../hooks/useAPI';
+import { useUser } from './UserContext';
+import { useAuthTokenContext } from './AuthTokenContext';
 
 // Define subscription product IDs
 export const SUBSCRIPTION_SKUS = {
@@ -72,7 +74,16 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [subscriptionProducts, setSubscriptionProducts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
-
+  
+  // Get user profile data
+  const { profile } = useUser();
+  
+  // Get authentication token state
+  const { tokenInitialized } = useAuthTokenContext();
+  
+  // Get API functions
+  const api = useApi();
+  
   // Connection state
   const [isConnected, setIsConnected] = useState<boolean>(false);
   
@@ -178,7 +189,7 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
     if (receipt) {
       try {
         // Send the receipt to backend for validation
-        const { verifySubscriptionReceipt } = useApi();
+        const { verifySubscriptionReceipt } = api;
         const result = await verifySubscriptionReceipt(receipt);
         
         if (result.isSubscribed) {
@@ -217,92 +228,61 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
 
   // Check subscription status
   const checkSubscriptionStatus = async (): Promise<boolean> => {
-    if (!isConnected) return false;
+    // Skip if token is not initialized
+    if (!tokenInitialized) {
+      return false;
+    }
     
     setIsLoading(true);
+    setError(null);
     
     try {
-      // First check with server
-      const { getSubscriptionStatus } = useApi();
-      const serverStatus = await getSubscriptionStatus();
+      // Skip check if not authenticated
+      if (!profile?.id) {
+        setIsSubscribed(false);
+        setSubscriptionInfo(null);
+        setIsLoading(false);
+        return false;
+      }
       
-      if (serverStatus.isSubscribed) {
-        // Server confirms active subscription
+      // Use the API to check subscription status
+      const result = await api.getSubscriptionStatus();
+      
+      if (result.isSubscribed) {
+        const subscriptionType = result.subscription.type as SubscriptionType;
+        const expiryDate = result.subscription.expiresDate;
+        
         const newSubscriptionInfo: SubscriptionInfo = {
           isActive: true,
-          type: serverStatus.subscription.type as SubscriptionType,
-          expiryDate: serverStatus.subscription.expiresDate,
-          lastVerified: new Date(),
+          type: subscriptionType,
+          expiryDate: expiryDate,
+          lastVerified: new Date()
         };
         
-        setSubscriptionInfo(newSubscriptionInfo);
         setIsSubscribed(true);
+        setSubscriptionInfo(newSubscriptionInfo);
         
-        // Cache the subscription info
-        cacheSubscriptionInfo(newSubscriptionInfo);
+        // Cache subscription info
+        await cacheSubscriptionInfo(newSubscriptionInfo);
         
+        setIsLoading(false);
         return true;
+      } else {
+        setIsSubscribed(false);
+        setSubscriptionInfo(null);
+        setIsLoading(false);
+        return false;
       }
-      
-      // If server says not subscribed, double-check locally
-      // Get available purchases (active subscriptions)
-      const purchases = await getAvailablePurchases();
-      
-      // Filter for subscription purchases
-      const subscriptionPurchases = purchases.filter(
-        purchase => Object.values(SUBSCRIPTION_SKUS).includes(purchase.productId)
-      );
-      
-      if (subscriptionPurchases.length > 0) {
-        // Found local subscription, let's verify it with the server
-        // Sort by most recent purchase
-        subscriptionPurchases.sort((a, b) => 
-          new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime()
-        );
-        
-        const latestPurchase = subscriptionPurchases[0];
-        
-        if (latestPurchase.transactionReceipt) {
-          // Send to server for verification
-          const { verifySubscriptionReceipt } = useApi();
-          const verificationResult = await verifySubscriptionReceipt(
-            latestPurchase.transactionReceipt
-          );
-          
-          if (verificationResult.isSubscribed) {
-            // Server now confirms active subscription
-            const newSubscriptionInfo: SubscriptionInfo = {
-              isActive: true,
-              type: verificationResult.subscription.type as SubscriptionType,
-              expiryDate: verificationResult.subscription.expiresDate,
-              lastVerified: new Date(),
-            };
-            
-            setSubscriptionInfo(newSubscriptionInfo);
-            setIsSubscribed(true);
-            
-            // Cache the subscription info
-            cacheSubscriptionInfo(newSubscriptionInfo);
-            
-            return true;
-          }
-        }
-      }
-      
-      // No active subscriptions found
-      setIsSubscribed(false);
-      setSubscriptionInfo(null);
-      
-      // Clear cached subscription info
-      await AsyncStorage.removeItem(SUBSCRIPTION_CACHE_KEY);
-      
-      return false;
     } catch (err) {
-      console.error('Error checking subscription status:', err);
-      setError(err instanceof Error ? err : new Error('Failed to check subscription status'));
-      return false;
-    } finally {
+      if (err instanceof Error) {
+        console.error('Failed to check subscription status:', err.message);
+        setError(err);
+      } else {
+        console.error('Failed to check subscription status:', err);
+        setError(new Error(String(err)));
+      }
       setIsLoading(false);
+      return false;
     }
   };
 
@@ -358,6 +338,14 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
       setIsLoading(false);
     }
   };
+
+  // Update useEffect to check subscription only when profile is loaded and token is initialized
+  useEffect(() => {
+    if (profile?.id && isConnected && tokenInitialized) {
+      // Check subscription status when user profile is loaded and connection is established
+      checkSubscriptionStatus();
+    }
+  }, [profile?.id, isConnected, tokenInitialized]);
 
   // Context value
   const value: SubscriptionContextType = {

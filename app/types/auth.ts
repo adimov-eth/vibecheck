@@ -56,6 +56,8 @@ export interface AuthTokenHook {
   isRefreshing: boolean;
   /** Last error encountered during token operations */
   lastError?: Error;
+  /** Number of retry attempts made */
+  retryCount: number;
   /** Clear any stored token, effectively logging the user out */
   clearToken: () => Promise<void>;
   /** Validate whether the current token is still valid */

@@ -4,6 +4,7 @@ import { Stack } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { RecordingProvider } from '../contexts/RecordingContext'
 import { AuthTokenProvider } from '../contexts/AuthTokenContext'
+import { UserProvider } from '../contexts/UserContext'
 import { SubscriptionProvider } from '../contexts/SubscriptionContext'
 import { UsageProvider } from '../contexts/UsageContext'
 import ToastComponent from '../components/Toast'
@@ -23,28 +24,30 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <SubscriptionProvider>
-      <SafeAreaProvider>
-        <RecordingProvider>
-          <ClerkProvider tokenCache={tokenCache} publishableKey={publishableKey}>
-            <ClerkLoaded>
-              <AuthTokenProvider>
-                <UsageProvider>
-                  <Stack screenOptions={{ 
-                    headerShown: false, // Hide all headers by default
-                    animation: 'slide_from_right' 
-                  }}>
-                    <Stack.Screen name="(auth)" options={{ headerShown: false }}/>
-                    <Stack.Screen name="(home)" />
-                    <Stack.Screen name="index" options={{ headerShown: false }} />
-                  </Stack>
-                  <ToastComponent />
-                </UsageProvider>
-              </AuthTokenProvider>
-            </ClerkLoaded>
-          </ClerkProvider>
-        </RecordingProvider>
-      </SafeAreaProvider>
-    </SubscriptionProvider>
+    <SafeAreaProvider>
+      <RecordingProvider>
+        <ClerkProvider tokenCache={tokenCache} publishableKey={publishableKey}>
+          <ClerkLoaded>
+            <AuthTokenProvider>
+              <UserProvider>
+                <SubscriptionProvider>
+                  <UsageProvider>
+                    <Stack screenOptions={{ 
+                      headerShown: false, // Hide all headers by default
+                      animation: 'slide_from_right' 
+                    }}>
+                      <Stack.Screen name="(auth)" options={{ headerShown: false }}/>
+                      <Stack.Screen name="(home)" />
+                      <Stack.Screen name="index" options={{ headerShown: false }} />
+                    </Stack>
+                    <ToastComponent />
+                  </UsageProvider>
+                </SubscriptionProvider>
+              </UserProvider>
+            </AuthTokenProvider>
+          </ClerkLoaded>
+        </ClerkProvider>
+      </RecordingProvider>
+    </SafeAreaProvider>
   )
 }

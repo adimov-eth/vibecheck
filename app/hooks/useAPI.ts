@@ -1,6 +1,7 @@
 // utils/useApi.ts
 import { useCallback, useRef } from 'react';
 import { useAuthToken } from './useAuthToken';
+import { UserProfile, UserProfileResponse } from '../types/user';
 
 const API_BASE_URL = 'https://v.bkk.lol'; // Replace with your server URL
 const MAX_RETRIES = 3;
@@ -48,6 +49,7 @@ export interface ApiHook {
   verifySubscriptionReceipt: (receiptData: string) => Promise<SubscriptionStatus>;
   getSubscriptionStatus: () => Promise<SubscriptionStatus>;
   getUserUsageStats: () => Promise<UsageStats>;
+  getUserProfile: () => Promise<UserProfile>;
 }
 
 export function useApi(): ApiHook {
@@ -225,6 +227,21 @@ export function useApi(): ApiHook {
     }
   }, [fetchWithRetry]);
 
+  // Get user profile
+  const getUserProfile = useCallback(async (): Promise<UserProfile> => {
+    try {
+      const response = await fetchWithRetry(`${API_BASE_URL}/users/me`, {
+        method: 'GET',
+      });
+      
+      const result = await response.json() as UserProfileResponse;
+      return result.user;
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      throw error;
+    }
+  }, [fetchWithRetry]);
+
   return {
     createConversation,
     getConversationStatus,
@@ -233,5 +250,6 @@ export function useApi(): ApiHook {
     verifySubscriptionReceipt,
     getSubscriptionStatus,
     getUserUsageStats,
+    getUserProfile,
   };
 }
