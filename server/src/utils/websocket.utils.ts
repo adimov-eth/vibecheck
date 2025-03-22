@@ -2,9 +2,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import { config } from '../config.js';
 import { logger } from './logger.utils.js';
-import jwt from 'jsonwebtoken';
+import * as jwt from 'jsonwebtoken';
 
-// Add declaration file for jsonwebtoken
+// Improve type definitions for WebSockets and JWT
 declare module 'jsonwebtoken' {
   export interface JwtPayload {
     sub?: string;
@@ -12,10 +12,14 @@ declare module 'jsonwebtoken' {
   }
 }
 
-// Declare module augmentation for missing types
+// Augment WebSocket interface with missing types
 declare module 'ws' {
   interface WebSocket {
+    // Add ping method which is used but not typed in some ws versions
     ping(data?: any, mask?: boolean, cb?: (err: Error) => void): void;
+    
+    // We can't use static here as it's not allowed in interface properties
+    // Instead, we'll access these as WebSocket.OPEN in the code
   }
 }
 
@@ -59,24 +63,55 @@ class WebSocketRateLimiter {
   
   private cleanup() {
     const now = Date.now();
-    for (const [clientId, data] of this.clients.entries()) {
+    
+    // Use Array.from to convert to array for TypeScript compatibility
+    Array.from(this.clients.entries()).forEach(([clientId, data]) => {
       if (data.resetTime <= now) {
         this.clients.delete(clientId);
       }
-    }
+    });
   }
 }
 
+/**
+ * Extended WebSocket client with additional properties for our implementation
+ */
 interface WebSocketClient extends WebSocket {
   isAlive: boolean;
   userId?: string;
   subscriptions: Set<string>;
+  // Add custom send method with our message format
+  send(data: string | Buffer | ArrayBuffer | Buffer[]): void;
 }
 
+/**
+ * Message format for WebSocket communication
+ */
 interface WebSocketMessage {
   type: string;
   payload: any;
   topic?: string;
+}
+
+/**
+ * Upload status message types
+ */
+type UploadStatus = 'started' | 'progress' | 'completed' | 'failed';
+
+/**
+ * Upload status message
+ */
+interface UploadStatusMessage extends WebSocketMessage {
+  type: 'upload_status';
+  payload: {
+    conversationId: string;
+    status: UploadStatus;
+    fileName?: string;
+    fileSize?: number;
+    progress?: number;
+    error?: string;
+    timestamp: string;
+  };
 }
 
 export class WebSocketManager {
@@ -84,6 +119,8 @@ export class WebSocketManager {
   private clients: Map<string, Set<WebSocketClient>> = new Map();
   private pingInterval: NodeJS.Timeout | null = null;
   private rateLimiter: WebSocketRateLimiter;
+  // Cache for conversation authorization to reduce database calls
+  private conversationAuthCache: Map<string, Set<string>> = new Map(); // Map<conversationId, Set<userId>>
 
   constructor() {
     // Initialize rate limiter with 100 messages per minute
@@ -93,6 +130,58 @@ export class WebSocketManager {
     );
     
     logger.info('WebSocket manager initialized with rate limiting');
+    
+    // Clean up authorization cache every hour
+    setInterval(() => this.cleanupAuthCache(), 60 * 60 * 1000);
+  }
+  
+  /**
+   * Check if a user is authorized to access a conversation
+   * For now, this is a simple implementation that trusts the client
+   * In a production environment, this should validate against the database
+   */
+  private checkUserConversationAccess(userId: string, conversationId: string): boolean {
+    // First check the cache
+    if (this.conversationAuthCache.has(conversationId)) {
+      const authorizedUsers = this.conversationAuthCache.get(conversationId);
+      if (authorizedUsers?.has(userId)) {
+        return true;
+      }
+    }
+    
+    // For now, we'll authorize any user who is subscribed to the conversation topic
+    // This is a simplification - in a real implementation, we should check a database
+    const userClients = this.clients.get(userId);
+    if (!userClients) return false;
+    
+    const topic = `conversation:${conversationId}`;
+    
+    // Use Array.from instead of spread operator for better TypeScript compatibility
+    const isSubscribed = Array.from(userClients).some(client => 
+      client.subscriptions.has(topic)
+    );
+    
+    // If authorized, add to cache for future quick lookups
+    if (isSubscribed) {
+      if (!this.conversationAuthCache.has(conversationId)) {
+        this.conversationAuthCache.set(conversationId, new Set());
+      }
+      const userSet = this.conversationAuthCache.get(conversationId);
+      if (userSet) {
+        userSet.add(userId);
+      }
+    }
+    
+    return isSubscribed;
+  }
+  
+  /**
+   * Clean up the authorization cache periodically to prevent memory leaks
+   */
+  private cleanupAuthCache(): void {
+    // Simple implementation: just clear the entire cache
+    this.conversationAuthCache.clear();
+    logger.debug('WebSocket authorization cache cleared');
   }
 
   public initialize(server: Server) {
@@ -181,14 +270,35 @@ export class WebSocketManager {
             ws.subscriptions.delete(data.topic);
             logger.debug(`Client unsubscribed from ${data.topic}`);
           } else if (data.type === 'upload_status' && data.topic && data.payload) {
-            // Forward upload status updates to all subscribers
+            // Process and forward upload status updates to all subscribers
             const topicParts = data.topic.split(':');
             if (topicParts.length === 2 && topicParts[0] === 'conversation') {
               const conversationId = topicParts[1];
+              const uploadMessage = data as UploadStatusMessage;
+              
+              // Validate that upload status message has required fields
+              if (!uploadMessage.payload.status || !uploadMessage.payload.timestamp) {
+                logger.warn(`Invalid upload_status message format from user ${ws.userId || 'unknown'}`);
+                ws.send(JSON.stringify({
+                  type: 'error',
+                  payload: {
+                    code: 'invalid_format',
+                    message: 'Upload status message is invalid'
+                  }
+                }));
+                return;
+              }
               
               // Security check: Only allow users to send updates for conversations they're authorized for
-              if (ws.userId && this.isUserAuthorizedForConversation(ws.userId, conversationId)) {
-                this.sendToConversation(conversationId, data);
+              if (ws.userId && this.checkUserConversationAccess(ws.userId, conversationId)) {
+                // Log the upload status
+                logger.info(`Upload ${uploadMessage.payload.status} for conversation ${conversationId}: ${
+                  uploadMessage.payload.fileName || 'unknown file'
+                }${
+                  uploadMessage.payload.progress ? ` (${uploadMessage.payload.progress}%)` : ''
+                }`);
+                
+                this.sendToConversation(conversationId, uploadMessage);
               } else {
                 // Log unauthorized attempt and send error to client
                 const logUserId = ws.userId || 'unknown';
