@@ -5,6 +5,7 @@ import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RecordingProvider } from '../contexts/RecordingContext';
 import { SubscriptionActionsProvider } from '../contexts/SubscriptionActionsContext';
+import { AuthTokenProvider } from '../providers/AuthTokenProvider';
 import ToastComponent from '../components/Toast';
 import { setupUploadQueue } from '../utils/backgroundUpload';
 import { useEffect } from 'react';
@@ -34,17 +35,19 @@ export default function RootLayout() {
           <ClerkLoaded>
             <QueryClientProvider client={queryClient}>
               <SubscriptionActionsProvider>
-                <Stack
-                  screenOptions={{
-                    headerShown: false,
-                    animation: 'slide_from_right',
-                  }}
-                >
-                  <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-                  <Stack.Screen name="(home)" />
-                  <Stack.Screen name="index" options={{ headerShown: false }} />
-                </Stack>
-                <ToastComponent />
+                <AuthTokenProvider>
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      animation: 'slide_from_right',
+                    }}
+                  >
+                    <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+                    <Stack.Screen name="(home)" />
+                    <Stack.Screen name="index" options={{ headerShown: false }} />
+                  </Stack>
+                  <ToastComponent />
+                </AuthTokenProvider>
               </SubscriptionActionsProvider>
             </QueryClientProvider>
           </ClerkLoaded>

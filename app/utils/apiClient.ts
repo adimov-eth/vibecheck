@@ -7,10 +7,8 @@ import { rateLimitedFetch, createRateLimitedFunction } from './apiRateLimiter';
 import { useGlobalAuthToken } from '../providers/AuthTokenProvider';
 import { useCallback } from 'react';
 import { useWebSocketManager, getWebSocketUrl } from './websocketManager';
-import Constants from 'expo-constants';
-
-// Get API URL from app config or use a default
-const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || 'https://api.vibecheck.app';
+import { API_ENDPOINTS, API_BASE_URL } from './apiEndpoints';
+import { ApiError } from '../hooks/useAPI';
 
 // Different rate limit settings for different endpoint types
 const RATE_LIMIT_SETTINGS = {
@@ -142,10 +140,6 @@ export function useApiClient(config?: ApiClientConfig) {
         // Subscribe to conversation updates
         const topic = `conversation:${conversationId}`;
         subscribe(topic);
-        
-        // For now, still do the HTTP request to get initial data,
-        // WebSocket will provide real-time updates afterward
-        // In a full implementation, we could use a WebSocket-based request-response pattern
       }
     }
     
@@ -187,6 +181,8 @@ export function useApiClient(config?: ApiClientConfig) {
     }
     
     try {
+      console.log(`API request to ${url}`);
+      
       // Use rate-limited fetch or regular fetch based on options
       const response = useRateLimit
         ? await rateLimitedFetch(url, requestOptions, {
@@ -195,18 +191,71 @@ export function useApiClient(config?: ApiClientConfig) {
           })
         : await fetch(url, requestOptions);
       
-      // Check if the response is OK
-      if (!response.ok) {
+      // Enhanced error handling with specific status codes
+      if (response.status === 401 || response.status === 403) {
+        throw new ApiError(`Authentication failed: ${response.statusText}`, {
+          status: response.status,
+          isAuthError: true,
+          code: 'AUTH_FAILED'
+        });
+      } else if (response.status === 429) {
+        // Rate limit exceeded
+        
+        throw new ApiError('Rate limit exceeded: Please try again later', {
+          status: response.status,
+          isRateLimitError: true,
+          code: 'RATE_LIMIT_EXCEEDED'
+        });
+      } else if (response.status >= 500) {
+        // Server errors
+        throw new ApiError(`Server error: ${response.statusText}`, {
+          status: response.status,
+          isServerError: true,
+          code: 'SERVER_ERROR'
+        });
+      } else if (!response.ok) {
+        // Try to parse error data from response
         const errorText = await response.text();
-        throw new Error(`API error (${response.status}): ${errorText}`);
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || 'Unknown error' };
+        }
+        
+        throw new ApiError(errorData.error || `API error (${response.status})`, {
+          status: response.status,
+          code: errorData.code || 'REQUEST_FAILED'
+        });
       }
       
       // Parse JSON response
       const data = await response.json();
       return data as T;
     } catch (error) {
+      // If it's already our ApiError, just rethrow it
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      
+      // Log the error with useful context
       console.error(`API request failed: ${url}`, error);
-      throw error;
+      
+      // Identify network errors
+      if (error instanceof TypeError && 
+          (error.message.includes('Network request failed') || 
+           error.message.includes('network error'))) {
+        throw new ApiError('Network connection error. Please check your internet connection.', {
+          isNetworkError: true,
+          code: 'NETWORK_ERROR'
+        });
+      }
+      
+      // Wrap other errors to have consistent error handling
+      throw new ApiError(
+        error instanceof Error ? error.message : 'Unknown API error',
+        { code: 'UNKNOWN_ERROR' }
+      );
     }
   }, [baseUrl, getFreshToken, config?.defaultHeaders, isWebSocketConnected, subscribe]);
 
@@ -479,6 +528,39 @@ export function useApiClient(config?: ApiClientConfig) {
     }
   }, [post, uploadFile, isWebSocketConnected, subscribe]);
   
+  /**
+   * Verifies a subscription purchase receipt
+   * @param platform - 'ios' or 'android'
+   * @param receipt - Receipt data string
+   * @param productId - ID of the purchased product
+   */
+  const verifySubscription = (platform: string, receipt: string, productId: string) => 
+    request<{valid: boolean; expiresAt: string; subscriptionId: string}>(
+      API_ENDPOINTS.SUBSCRIPTION_VERIFY, 
+      { 
+        method: 'POST',
+        body: JSON.stringify({ platform, receipt, productId })
+      }
+    );
+
+  /**
+   * Gets the current user's subscription status
+   * @returns Promise with subscription data
+   */
+  const getSubscriptionStatus = () => 
+    request<{active: boolean; tier: string; expiresAt: string}>(
+      API_ENDPOINTS.SUBSCRIPTION_STATUS
+    );
+
+  /**
+   * Gets the current user's usage statistics
+   * @returns Promise with usage data
+   */
+  const getUsageStats = () => 
+    request<{used: number; limit: number; resetsAt: string}>(
+      API_ENDPOINTS.USAGE_STATS
+    );
+
   return {
     request,
     get,
@@ -489,6 +571,9 @@ export function useApiClient(config?: ApiClientConfig) {
     uploadFile,
     createRateLimitedApi,
     createConversationWithFiles,
+    verifySubscription,
+    getSubscriptionStatus,
+    getUsageStats,
     baseUrl,
     wsUrl,
     isWebSocketConnected,

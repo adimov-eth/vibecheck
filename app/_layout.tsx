@@ -4,6 +4,8 @@ import { ClerkProvider } from '@clerk/clerk-expo';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthTokenProvider } from './providers/AuthTokenProvider';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './utils/queryClient';
 
 // Import any env variables or configs
 const clerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || '';
@@ -23,20 +25,22 @@ export default function RootLayout() {
     <ClerkProvider publishableKey={clerkPublishableKey}>
       {/* AuthTokenProvider centralizes token management to prevent multiple instances */}
       <AuthTokenProvider>
-        <SafeAreaProvider>
-          <StatusBar style="auto" />
-          <Stack
-            screenOptions={{
-              headerStyle: {
-                backgroundColor: '#fff',
-              },
-              headerTintColor: '#000',
-              headerTitleStyle: {
-                fontWeight: 'bold',
-              },
-            }}
-          />
-        </SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <SafeAreaProvider>
+            <StatusBar style="auto" />
+            <Stack
+              screenOptions={{
+                headerStyle: {
+                  backgroundColor: '#fff',
+                },
+                headerTintColor: '#000',
+                headerTitleStyle: {
+                  fontWeight: 'bold',
+                },
+              }}
+            />
+          </SafeAreaProvider>
+        </QueryClientProvider>
       </AuthTokenProvider>
     </ClerkProvider>
   );

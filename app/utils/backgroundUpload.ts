@@ -3,16 +3,19 @@ import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from "expo-file-system";
 
-import Constants from 'expo-constants';
 import { getWebSocketUrl } from './websocketManager';
+import { API_ENDPOINTS, API_BASE_URL } from './apiEndpoints';
+import { ApiError } from '../hooks/useAPI';
 
 // Use the same API URL as other parts of the application
-const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || "https://api.vibecheck.app";
 
 // Get WebSocket URL using the same method as websocketManager
 const WS_URL = getWebSocketUrl(API_BASE_URL);
 
-const UPLOAD_TASK = 'upload-task';
+const UPLOAD_TASK = 'VIBECHECK_BACKGROUND_UPLOAD';
+const UPLOAD_QUEUE_KEY = 'vibecheck:uploadQueue';
+const MAX_RETRIES = 3;
+// const RETRY_DELAY = 5000; // 5 seconds
 
 // Define upload item interface
 interface UploadItem {
@@ -25,6 +28,17 @@ interface UploadItem {
   error?: string;
   nextRetry?: number; // Timestamp for next retry
   progress?: number; // Upload progress percentage (0-100)
+}
+
+// Types for upload queue items
+interface QueuedUpload {
+  id: string;
+  conversationId: string;
+  uri: string;
+  metadata?: Record<string, any>;
+  retryCount: number;
+  lastAttempt?: number;
+  createdAt: number;
 }
 
 /**
@@ -148,107 +162,298 @@ const getFileSize = async (fileUri: string): Promise<number> => {
   }
 };
 
-// Define the background task
+/**
+ * Define the background task for handling uploads
+ */
 TaskManager.defineTask(UPLOAD_TASK, async () => {
-    try {
-      const queue = await AsyncStorage.getItem('uploadQueue');
-      if (!queue) return BackgroundFetch.BackgroundFetchResult.NoData;
+  console.log('[BackgroundUpload] Background task started');
   
-      const uploads = JSON.parse(queue);
-      const token = await AsyncStorage.getItem('auth_token');
-  
-      if (!token) {
-        console.error('No auth token available for background upload');
-        return BackgroundFetch.BackgroundFetchResult.Failed;
-      }
-  
-      let hasChanges = false;
-      for (const upload of uploads) {
-        if (upload.status === 'pending') {
-          try {
-            const formData = new FormData();
-            const fileName = upload.fileUri.split("/").pop() || "audio.webm";
-            let mimeType = "audio/webm";
-            if (fileName.endsWith('.m4a')) mimeType = "audio/x-m4a";
-            else if (fileName.endsWith('.wav')) mimeType = "audio/wav";
-            
-            formData.append("audio", { uri: upload.fileUri, name: fileName, type: mimeType } as any);
-            formData.append("conversationId", upload.conversationId);
-  
-            const response = await fetch(`${API_BASE_URL}/audio`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${token}` },
-              body: formData,
-            });
-  
-            if (response.ok) {
-              upload.status = 'uploaded';
-              hasChanges = true;
-              console.log(`Successfully uploaded ${fileName}`);
-            } else {
-              console.error(`Upload failed for ${fileName}: ${response.status} - ${await response.text()}`);
-            }
-          } catch (error) {
-            console.error(`Upload failed for file:`, error);
-          }
-        }
-      }
-  
-      if (hasChanges) {
-        await AsyncStorage.setItem('uploadQueue', JSON.stringify(uploads));
-        return BackgroundFetch.BackgroundFetchResult.NewData;
-      }
-  
+  try {
+    // Get pending uploads from storage
+    const queueJson = await AsyncStorage.getItem(UPLOAD_QUEUE_KEY);
+    if (!queueJson) {
+      console.log('[BackgroundUpload] No uploads pending');
       return BackgroundFetch.BackgroundFetchResult.NoData;
-    } catch (error) {
-      console.error('Background upload failed:', error);
+    }
+
+    // Parse uploads from storage
+    let uploads: QueuedUpload[] = [];
+    try {
+      uploads = JSON.parse(queueJson);
+      console.log(`[BackgroundUpload] Found ${uploads.length} pending uploads`);
+    } catch (parseError) {
+      console.error('[BackgroundUpload] Error parsing upload queue:', parseError);
+      // If data is corrupt, reset it
+      await AsyncStorage.removeItem(UPLOAD_QUEUE_KEY);
       return BackgroundFetch.BackgroundFetchResult.Failed;
     }
-  });
 
-// Register the background task
-export const registerUploadTask = async () => {
-  await BackgroundFetch.registerTaskAsync(UPLOAD_TASK, {
-    minimumInterval: 15 * 60, // 15 minutes
-    stopOnTerminate: false,
-    startOnBoot: true,
-  });
+    // Get authentication token
+    let token: string | null;
+    try {
+      token = await AsyncStorage.getItem('auth_token');
+      
+      if (!token) {
+        console.error('[BackgroundUpload] No auth token available');
+        return BackgroundFetch.BackgroundFetchResult.Failed;
+      }
+    } catch (tokenError) {
+      console.error('[BackgroundUpload] Failed to get auth token:', tokenError);
+      return BackgroundFetch.BackgroundFetchResult.Failed;
+    }
+
+    // Track uploads that failed and need to be retried
+    const remainingUploads: QueuedUpload[] = [];
+    let successCount = 0;
+    
+    // Process each upload
+    for (const upload of uploads) {
+      try {
+        // Create FormData for file upload
+        const formData = new FormData();
+        
+        // Add file to form data
+        formData.append('file', {
+          uri: upload.uri,
+          name: upload.uri.split('/').pop() || 'audio.m4a',
+          type: 'audio/m4a', // Default to m4a, but could be determined from file extension
+        } as any);
+        
+        // Add conversation ID to form data
+        formData.append('conversationId', upload.conversationId);
+        
+        // Add any additional metadata
+        if (upload.metadata) {
+          Object.entries(upload.metadata).forEach(([key, value]) => {
+            formData.append(key, String(value));
+          });
+        }
+
+        // Log upload attempt
+        console.log(`[BackgroundUpload] Uploading file for conversation ${upload.conversationId}`);
+        
+        // Make request to upload endpoint
+        const response = await fetch(`${API_BASE_URL}${API_ENDPOINTS.AUDIO_UPLOAD}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            // Don't set Content-Type for multipart/form-data, it will be set automatically
+          },
+          body: formData,
+        });
+
+        // Check response status
+        if (!response.ok) {
+          // Parse error response
+          const errorText = await response.text();
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch {
+            errorData = { error: errorText || 'Unknown error' };
+          }
+          
+          // Handle different error types
+          if (response.status === 401 || response.status === 403) {
+            // Auth errors - can't retry with same token
+            console.error('[BackgroundUpload] Authentication error:', errorData.error);
+            throw new ApiError('Authentication failed', {
+              isAuthError: true,
+              status: response.status
+            });
+          } else if (response.status === 429) {
+            // Rate limit - add to retry queue with backoff
+            console.warn('[BackgroundUpload] Rate limit hit, will retry later');
+            upload.retryCount++;
+            upload.lastAttempt = Date.now();
+            remainingUploads.push(upload);
+            continue;
+          } else if (response.status >= 500) {
+            // Server error - retry if under max retries
+            console.error('[BackgroundUpload] Server error:', errorData.error);
+            if (upload.retryCount < MAX_RETRIES) {
+              upload.retryCount++;
+              upload.lastAttempt = Date.now();
+              remainingUploads.push(upload);
+            }
+            continue;
+          } else {
+            // Other client errors - don't retry
+            console.error('[BackgroundUpload] Upload failed:', errorData.error);
+            throw new Error(`Upload failed: ${errorData.error || response.statusText}`);
+          }
+        }
+
+        // Success! 
+        console.log(`[BackgroundUpload] Successfully uploaded file for conversation ${upload.conversationId}`);
+        successCount++;
+        
+        // Send success notification if needed
+        // This could update a local storage record, trigger a notification, etc.
+        
+      } catch (uploadError) {
+        console.error(`[BackgroundUpload] Error uploading file: ${uploadError}`);
+        
+        // Only retry if under max retries and not an auth error
+        const isAuthError = uploadError instanceof ApiError && uploadError.isAuthError;
+        
+        if (!isAuthError && upload.retryCount < MAX_RETRIES) {
+          upload.retryCount++;
+          upload.lastAttempt = Date.now();
+          remainingUploads.push(upload);
+        }
+      }
+    }
+
+    // Update queue with remaining uploads
+    if (remainingUploads.length > 0) {
+      await AsyncStorage.setItem(UPLOAD_QUEUE_KEY, JSON.stringify(remainingUploads));
+      console.log(`[BackgroundUpload] ${remainingUploads.length} uploads pending for retry`);
+    } else {
+      await AsyncStorage.removeItem(UPLOAD_QUEUE_KEY);
+      console.log('[BackgroundUpload] All uploads completed successfully');
+    }
+
+    // Return appropriate result
+    if (successCount > 0) {
+      return BackgroundFetch.BackgroundFetchResult.NewData;
+    } else if (remainingUploads.length > 0) {
+      return BackgroundFetch.BackgroundFetchResult.Failed;
+    } else {
+      return BackgroundFetch.BackgroundFetchResult.NoData;
+    }
+    
+  } catch (error) {
+    console.error('[BackgroundUpload] Background task failed:', error);
+    return BackgroundFetch.BackgroundFetchResult.Failed;
+  }
+});
+
+/**
+ * Initialize background fetch for uploads
+ */
+export const initBackgroundUpload = (): void => {
+  try {
+    // Define the task first using TaskManager if not already defined
+    if (!TaskManager.isTaskDefined(UPLOAD_TASK)) {
+      TaskManager.defineTask(UPLOAD_TASK, async () => {
+        console.log('[BackgroundUpload] Background task executed');
+        
+        try {
+          await TaskManager.defineTask(UPLOAD_TASK, async () => {
+            // The task implementation is already defined separately above
+            return BackgroundFetch.BackgroundFetchResult.NoData;
+          });
+        } catch (taskError) {
+          console.error('[BackgroundUpload] Task execution failed:', taskError);
+          return BackgroundFetch.BackgroundFetchResult.Failed;
+        }
+        
+        return BackgroundFetch.BackgroundFetchResult.NewData;
+      });
+    }
+    
+    // Register the background fetch task
+    BackgroundFetch.registerTaskAsync(UPLOAD_TASK, {
+      minimumInterval: 15 * 60, // 15 minutes in seconds
+      stopOnTerminate: false,
+      startOnBoot: true,
+    }).then(() => {
+      console.log('[BackgroundUpload] Background upload service initialized');
+    }).catch((error: Error) => {
+      console.error('[BackgroundUpload] Background fetch failed to start:', error);
+    });
+  } catch (error) {
+    console.error('[BackgroundUpload] Failed to initialize background upload:', error);
+  }
 };
 
-// Add recording to upload queue
-export const addToUploadQueue = async (conversationId: string, fileUri: string) => {
-  const queue = await AsyncStorage.getItem('uploadQueue');
-  const uploads: UploadItem[] = queue ? JSON.parse(queue) : [];
-  
-  // Check if this file is already in the queue
-  const existingIndex = uploads.findIndex((u: UploadItem) => u.fileUri === fileUri);
-  
-  if (existingIndex >= 0) {
-    // Already in queue, update it only if not already uploaded
-    if (uploads[existingIndex].status !== 'uploaded') {
-      uploads[existingIndex] = {
-        ...uploads[existingIndex],
-        conversationId,
-        status: 'pending',
-        retryCount: (uploads[existingIndex].retryCount || 0) + 1,
-        lastRetry: new Date().toISOString()
-      };
-    }
-  } else {
-    // Add new entry
-    uploads.push({
+/**
+ * Add a file to the upload queue
+ */
+export const addToUploadQueue = async (
+  conversationId: string,
+  uri: string,
+  metadata?: Record<string, any>
+): Promise<string> => {
+  try {
+    // Generate a unique ID for this upload
+    const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create the upload object
+    const uploadItem: QueuedUpload = {
+      id: uploadId,
       conversationId,
-      fileUri,
-      status: 'pending',
+      uri,
+      metadata,
       retryCount: 0,
-      addedAt: new Date().toISOString()
-    });
+      createdAt: Date.now(),
+    };
+    
+    // Get existing queue
+    const queueJson = await AsyncStorage.getItem(UPLOAD_QUEUE_KEY);
+    const queue: QueuedUpload[] = queueJson ? JSON.parse(queueJson) : [];
+    
+    // Add new upload to queue
+    queue.push(uploadItem);
+    
+    // Save updated queue
+    await AsyncStorage.setItem(UPLOAD_QUEUE_KEY, JSON.stringify(queue));
+    
+    console.log(`[BackgroundUpload] Added file to upload queue for conversation ${conversationId}`);
+    
+    // Trigger a background fetch to process the queue
+    try {
+      await BackgroundFetch.registerTaskAsync(UPLOAD_TASK, {
+        minimumInterval: 1, // Minimum interval in seconds
+        stopOnTerminate: false,
+      });
+    } catch (error: unknown) {
+      console.warn('[BackgroundUpload] Failed to schedule immediate task:', error);
+    }
+    
+    return uploadId;
+  } catch (error) {
+    console.error('[BackgroundUpload] Failed to add to upload queue:', error);
+    throw new Error('Failed to queue upload');
   }
-  
-  await AsyncStorage.setItem('uploadQueue', JSON.stringify(uploads));
-  
-  // Try to upload immediately
-  await uploadPendingFiles();
+};
+
+/**
+ * Get the current upload queue status
+ */
+export const getUploadQueueStatus = async (): Promise<{
+  pendingCount: number;
+  uploads: QueuedUpload[];
+}> => {
+  try {
+    const queueJson = await AsyncStorage.getItem(UPLOAD_QUEUE_KEY);
+    const uploads: QueuedUpload[] = queueJson ? JSON.parse(queueJson) : [];
+    
+    return {
+      pendingCount: uploads.length,
+      uploads,
+    };
+  } catch (error) {
+    console.error('[BackgroundUpload] Failed to get upload queue status:', error);
+    return {
+      pendingCount: 0,
+      uploads: [],
+    };
+  }
+};
+
+/**
+ * Clear the upload queue
+ */
+export const clearUploadQueue = async (): Promise<void> => {
+  try {
+    await AsyncStorage.removeItem(UPLOAD_QUEUE_KEY);
+    console.log('[BackgroundUpload] Upload queue cleared');
+  } catch (error) {
+    console.error('[BackgroundUpload] Failed to clear upload queue:', error);
+    throw new Error('Failed to clear upload queue');
+  }
 };
 
 // Function to get the first valid conversation ID from the uploads in queue
@@ -617,7 +822,7 @@ export const cleanupOldUploads = async (): Promise<void> => {
 
 // Call cleanup on app start and periodically
 export const setupUploadQueue = async (): Promise<void> => {
-  await registerUploadTask();
+  await initBackgroundUpload();
   await cleanupOldUploads();
   
   // Also process any pending uploads

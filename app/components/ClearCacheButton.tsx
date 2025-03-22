@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { performFullCleanup } from '../utils/cleanupStorage';
 import { showToast } from './Toast';
 import { useRecording } from '../contexts/RecordingContext';

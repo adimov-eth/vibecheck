@@ -21,6 +21,7 @@ export interface UsageStats {
   currentUsage: number;
   limit: number;
   remainingConversations: number;
+  resetDate?: string;
 }
 
 export interface SubscriptionInfo {

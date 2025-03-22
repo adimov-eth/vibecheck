@@ -245,7 +245,7 @@ If the server encounters an error while processing a message or if there's an au
 
 ```javascript
 const connectToWebSocket = (token) => {
-  const ws = new WebSocket(`wss://api.vibecheck.app/ws?token=${token}`);
+  const ws = new WebSocket(`wss://v.bkk.lol/ws?token=${token}`);
   
   ws.onopen = () => {
     console.log('Connected to WebSocket server');

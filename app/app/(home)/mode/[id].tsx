@@ -6,7 +6,7 @@ import RecordingScreen from '../RecordingScreen';
 import AppBar from '../../../components/AppBar';
 import ModeCard from '../../../components/ModeCard';
 import Button from '../../../components/Button';
-import { useUsageStats } from '../../../hooks/useApiQueries'; // Replace UsageContext with useUsageStats
+import { useUsageStatsV2 } from '../../../hooks/useApiQueries'; // Updated to useUsageStatsV2
 
 // Define the Mode interface locally since it doesn't exist in a central types file
 interface Mode {
@@ -19,7 +19,7 @@ interface Mode {
 export default function ModePage() {
   const router = useRouter();
   const { id, title, description, color } = useLocalSearchParams();
-  const { data: usageStats, isLoading: usageLoading } = useUsageStats(); // Get usage stats
+  const { data: usageStats, isLoading: usageLoading } = useUsageStatsV2(); // Updated to useUsageStatsV2
   const [showRecording, setShowRecording] = useState(false);
 
   const selectedMode: Mode = {

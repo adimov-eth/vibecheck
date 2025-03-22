@@ -73,6 +73,66 @@ const toastConfig: ToastConfig = {
     />
   ),
 
+  // Warning toast type
+  warning: (props) => (
+    <BaseToast
+      {...props}
+      style={{
+        borderLeftColor: colors.warning,
+        backgroundColor: colors.cardBackground,
+        height: 'auto',
+        minHeight: 60,
+        paddingVertical: spacing.sm,
+      }}
+      contentContainerStyle={{ paddingHorizontal: spacing.md }}
+      text1Style={{
+        ...typography.body1,
+        fontWeight: '600',
+        color: colors.darkText,
+      }}
+      text2Style={{
+        ...typography.body2,
+        color: colors.mediumText,
+      }}
+      text2NumberOfLines={2}
+      renderLeadingIcon={() => (
+        <View style={styles.iconContainer}>
+          <Ionicons name="warning" size={24} color={colors.warning} />
+        </View>
+      )}
+    />
+  ),
+
+  // Info toast type
+  info: (props) => (
+    <BaseToast
+      {...props}
+      style={{
+        borderLeftColor: colors.info,
+        backgroundColor: colors.cardBackground,
+        height: 'auto',
+        minHeight: 60,
+        paddingVertical: spacing.sm,
+      }}
+      contentContainerStyle={{ paddingHorizontal: spacing.md }}
+      text1Style={{
+        ...typography.body1,
+        fontWeight: '600',
+        color: colors.darkText,
+      }}
+      text2Style={{
+        ...typography.body2,
+        color: colors.mediumText,
+      }}
+      text2NumberOfLines={2}
+      renderLeadingIcon={() => (
+        <View style={styles.iconContainer}>
+          <Ionicons name="information-circle" size={24} color={colors.info} />
+        </View>
+      )}
+    />
+  ),
+
   // Custom network error type
   networkError: ({ text1, text2, ...props }: CustomToastProps) => (
     <View style={styles.networkErrorContainer}>
@@ -114,6 +174,24 @@ export const showToast = {
       text2: message,
       position: 'bottom',
       visibilityTime: 4000,
+    });
+  },
+  warning: (title: string, message?: string) => {
+    Toast.show({
+      type: 'warning',
+      text1: title,
+      text2: message,
+      position: 'bottom',
+      visibilityTime: 4000,
+    });
+  },
+  info: (title: string, message?: string) => {
+    Toast.show({
+      type: 'info',
+      text1: title,
+      text2: message,
+      position: 'bottom',
+      visibilityTime: 3000,
     });
   }
 };
