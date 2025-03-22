@@ -5,7 +5,6 @@ import { logger } from './src/utils/logger.utils.js';
 import { websocketManager } from './src/utils/websocket.utils.js';
 import setupDatabase from './src/database/utils/setupDb.js';
 import { shutdownDb } from './src/database/index.js';
-import initScheduledMaintenance from './src/utils/scheduled-maintenance.js';
 
 // Main function to start the server
 async function main() {

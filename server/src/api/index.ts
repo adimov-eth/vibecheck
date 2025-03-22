@@ -4,7 +4,6 @@ import http from 'http';
 import helmet from 'helmet';
 import cors from 'cors';
 import { errorHandler } from './middleware/error.middleware';
-import { getDbConnection } from '../database';
 import authRoutes from './routes/auth.routes';
 import conversationRoutes from './routes/conversation.routes';
 import audioRoutes from './routes/audio.routes';
