@@ -4,7 +4,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@clerk/clerk-expo';
 import * as FileSystem from "expo-file-system";
 
-const API_BASE_URL = "https://v.bkk.lol"; // API server URL
+import Constants from 'expo-constants';
+import { getWebSocketUrl } from './websocketManager';
+
+// Use the same API URL as other parts of the application
+const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || "https://api.vibecheck.app";
+
+// Get WebSocket URL using the same method as websocketManager
+const WS_URL = getWebSocketUrl(API_BASE_URL);
 
 const UPLOAD_TASK = 'upload-task';
 
@@ -12,12 +19,135 @@ const UPLOAD_TASK = 'upload-task';
 interface UploadItem {
   conversationId: string;
   fileUri: string;
-  status: 'pending' | 'uploaded' | 'failed';
+  status: 'pending' | 'uploaded' | 'failed' | 'retrying';
   retryCount?: number;
   addedAt?: string;
   lastRetry?: string;
   error?: string;
+  nextRetry?: number; // Timestamp for next retry
+  progress?: number; // Upload progress percentage (0-100)
 }
+
+/**
+ * Notify server about upload status via WebSocket
+ * This is a lightweight implementation that doesn't maintain a persistent connection
+ */
+const notifyUploadStatus = async (
+  conversationId: string, 
+  status: 'started' | 'progress' | 'completed' | 'failed',
+  details: any = {}
+) => {
+  try {
+    const token = await AsyncStorage.getItem('auth_token');
+    if (!token) return;
+    
+    // Create a temporary WebSocket connection for the notification
+    const ws = new WebSocket(`${WS_URL}`);
+    
+    // Track if we've received acknowledgment
+    let messagesAcknowledged = 0;
+    const expectedAcknowledgments = 2; // For subscribe and status message
+    let connectionClosed = false;
+    
+    // Create promise to track completion
+    return new Promise<void>((resolve, reject) => {
+      // Set maximum timeout for the entire operation
+      const maxTimeout = setTimeout(() => {
+        if (!connectionClosed) {
+          console.log('WebSocket notification timed out, closing connection');
+          connectionClosed = true;
+          ws.close();
+          resolve(); // Resolve anyway to not block the upload process
+        }
+      }, 5000); // 5 second maximum timeout
+      
+      // Handle server responses
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          // Check if this is an acknowledgment message
+          if (data.type === 'ack' || data.type === 'subscription_success') {
+            messagesAcknowledged++;
+            
+            // If we've received all expected acknowledgments, close the connection
+            if (messagesAcknowledged >= expectedAcknowledgments && !connectionClosed) {
+              console.log('WebSocket notification complete, closing connection');
+              connectionClosed = true;
+              clearTimeout(maxTimeout);
+              ws.close();
+              resolve();
+            }
+          }
+        } catch (error) {
+          console.warn('Error parsing WebSocket message:', error);
+        }
+      };
+      
+      ws.onopen = () => {
+        // Send authentication message first
+        ws.send(JSON.stringify({
+          type: 'authenticate',
+          token: token
+        }));
+        
+        // Then send subscription message
+        ws.send(JSON.stringify({
+          type: 'subscribe',
+          topic: `conversation:${conversationId}`
+        }));
+        
+        // Then send the upload status message
+        ws.send(JSON.stringify({
+          type: 'upload_status',
+          topic: `conversation:${conversationId}`,
+          payload: {
+            conversationId,
+            status,
+            timestamp: new Date().toISOString(),
+            ...details
+          }
+        }));
+      };
+      
+      // Handle errors
+      ws.onerror = (error) => {
+        console.error('WebSocket notification error:', error);
+        if (!connectionClosed) {
+          connectionClosed = true;
+          clearTimeout(maxTimeout);
+          ws.close();
+          resolve(); // Resolve anyway to not block the upload process
+        }
+      };
+      
+      ws.onclose = () => {
+        if (!connectionClosed) {
+          connectionClosed = true;
+          clearTimeout(maxTimeout);
+          resolve();
+        }
+      };
+    });
+  } catch (error) {
+    console.error('Failed to send WebSocket notification:', error);
+  }
+}
+
+// Helper function to safely get file size
+const getFileSize = async (fileUri: string): Promise<number> => {
+  try {
+    const fileInfo = await FileSystem.getInfoAsync(fileUri);
+    // Type assertion for when file exists and has size property
+    if (fileInfo.exists && 'size' in fileInfo) {
+      return fileInfo.size;
+    }
+    return 0;
+  } catch (error) {
+    console.error('Error getting file size:', error);
+    return 0;
+  }
+};
 
 // Define the background task
 TaskManager.defineTask(UPLOAD_TASK, async () => {
@@ -171,9 +301,29 @@ export const uploadPendingFiles = async (): Promise<boolean> => {
 
     let hasChanges = false;
     let updatedUploads = [...uploads];
+    const now = Date.now();
     
+    // First pass: process retrying uploads that are ready for retry
     for (let i = 0; i < uploads.length; i++) {
       const upload = uploads[i];
+      
+      // Skip uploads that are not in retrying state or not ready for retry
+      if (upload.status !== 'retrying' || (upload.nextRetry && upload.nextRetry > now)) {
+        continue;
+      }
+      
+      updatedUploads[i] = {
+        ...updatedUploads[i],
+        status: 'pending',
+        retryCount: (upload.retryCount || 0) + 1,
+        lastRetry: new Date().toISOString()
+      };
+      hasChanges = true;
+    }
+    
+    // Second pass: process pending uploads
+    for (let i = 0; i < updatedUploads.length; i++) {
+      const upload = updatedUploads[i];
       if (upload.status === 'pending') {
         try {
           // Check if metadata file exists for this recording
@@ -221,28 +371,192 @@ export const uploadPendingFiles = async (): Promise<boolean> => {
           formData.append("conversationId", conversationId);
 
           console.log(`Uploading file ${fileName} for conversation ${conversationId}`);
-          const response = await fetch(`${API_BASE_URL}/audio`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
+          
+          // Send WebSocket notification that upload is starting
+          await notifyUploadStatus(conversationId, 'started', { 
+            fileName, 
+            fileSize: await getFileSize(upload.fileUri)
           });
+          
+          // Use XMLHttpRequest to track progress
+          const xhr = new XMLHttpRequest();
+          let progressReported = 0;
+          
+          // Create a promise that resolves when the upload is complete
+          const uploadPromise = new Promise<Response>((resolve, reject) => {
+            xhr.open('POST', `${API_BASE_URL}/audio`);
+            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+            
+            // Track upload progress
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable) {
+                const progress = Math.round((event.loaded / event.total) * 100);
+                
+                // Only report progress at 10% intervals to reduce WebSocket traffic
+                if (progress >= progressReported + 10 || progress === 100) {
+                  progressReported = progress;
+                  
+                  // Update progress in the upload item
+                  updatedUploads[i] = {...updatedUploads[i], progress};
+                  hasChanges = true;
+                  
+                  // Send WebSocket notification of progress
+                  notifyUploadStatus(conversationId, 'progress', { progress });
+                  console.log(`Upload progress: ${progress}%`);
+                }
+              }
+            };
+            
+            // Handle completion
+            xhr.onload = () => {
+              const response = {
+                ok: xhr.status >= 200 && xhr.status < 300,
+                status: xhr.status,
+                text: () => Promise.resolve(xhr.responseText),
+                json: () => Promise.resolve(JSON.parse(xhr.responseText))
+              } as Response;
+              
+              resolve(response);
+            };
+            
+            // Handle errors
+            xhr.onerror = () => {
+              reject(new Error('Network error occurred'));
+            };
+            
+            xhr.ontimeout = () => {
+              reject(new Error('Request timed out'));
+            };
+            
+            // Send the form data
+            xhr.send(formData);
+          });
+          
+          const response = await uploadPromise;
 
           if (response.ok) {
-            updatedUploads[i] = {...updatedUploads[i], status: 'uploaded'};
+            updatedUploads[i] = {...updatedUploads[i], status: 'uploaded', progress: 100};
             hasChanges = true;
             console.log(`Successfully uploaded ${fileName}`);
+            
+            // Send WebSocket notification of successful upload
+            await notifyUploadStatus(conversationId, 'completed', { 
+              fileName,
+              fileSize: await getFileSize(upload.fileUri)
+            });
           } else {
             const errorText = await response.text();
             console.error(`Upload failed for ${fileName}: ${response.status} - ${errorText}`);
             
-            // If the conversation doesn't exist, mark this upload as failed
+            // Send WebSocket notification of failed upload
+            await notifyUploadStatus(conversationId, 'failed', { 
+              fileName,
+              error: errorText,
+              status: response.status
+            });
+            
+            // Handle race condition where conversation isn't created yet
             if (response.status === 404 && errorText.includes("Conversation not found")) {
-              updatedUploads[i] = {...updatedUploads[i], status: 'failed', error: 'Conversation not found'};
+              const retryCount = (upload.retryCount || 0) + 1;
+              const retryDelay = Math.min(30000, 1000 * Math.pow(2, retryCount)); // Exponential backoff capped at 30s
+              console.log(`Request failed, retrying (${retryCount}/3) in ${retryDelay/1000} seconds...`);
+              
+              // If we've tried too many times, mark as failed
+              if (retryCount > 3) {
+                updatedUploads[i] = {
+                  ...updatedUploads[i], 
+                  status: 'failed', 
+                  error: 'Conversation not found after multiple retries',
+                  retryCount
+                };
+              } else {
+                // Otherwise, schedule a retry
+                updatedUploads[i] = {
+                  ...updatedUploads[i], 
+                  status: 'retrying', 
+                  error: 'Conversation not found',
+                  retryCount,
+                  nextRetry: now + retryDelay
+                };
+              }
+              hasChanges = true;
+            }
+            // Handle auth errors
+            else if (response.status === 401 || response.status === 403) {
+              console.error('Auth token invalid, redirecting to sign-in');
+              updatedUploads[i] = {
+                ...updatedUploads[i], 
+                status: 'failed', 
+                error: 'Authentication error'
+              };
+              hasChanges = true;
+            }
+            // Handle other errors
+            else {
+              updatedUploads[i] = {
+                ...updatedUploads[i], 
+                status: 'failed', 
+                error: `HTTP ${response.status}: ${errorText}`
+              };
               hasChanges = true;
             }
           }
         } catch (error) {
           console.error(`Upload failed for file:`, error);
+          
+          // Apply retry mechanism for network errors
+          const retryCount = (upload.retryCount || 0) + 1;
+          const retryDelay = Math.min(30000, 1000 * Math.pow(2, retryCount)); // Exponential backoff capped at 30s
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          
+          // Check if this is a network-related error
+          const isNetworkError = 
+            errorMessage.includes('Network error') || 
+            errorMessage.includes('timeout') || 
+            errorMessage.includes('connection') ||
+            errorMessage.includes('ECONNREFUSED') || 
+            errorMessage.includes('ETIMEDOUT');
+          
+          // If it's a network error and we haven't exceeded retry limit
+          if (isNetworkError && retryCount <= 3) {
+            console.log(`Network error, retrying (${retryCount}/3) in ${retryDelay/1000} seconds...`);
+            updatedUploads[i] = {
+              ...updatedUploads[i], 
+              status: 'retrying', 
+              error: `Network error: ${errorMessage}`,
+              retryCount,
+              nextRetry: now + retryDelay
+            };
+            
+            // Send WebSocket notification of failed upload with retry planned
+            if (upload.conversationId) {
+              notifyUploadStatus(upload.conversationId, 'failed', { 
+                fileName: upload.fileUri.split("/").pop() || "audio.webm",
+                error: errorMessage,
+                willRetry: true,
+                retryCount,
+                nextRetryIn: retryDelay / 1000
+              }).catch(e => console.error('Failed to send retry notification:', e));
+            }
+          } else {
+            // If it's not a network error or we've exceeded retry limit
+            updatedUploads[i] = {
+              ...updatedUploads[i], 
+              status: 'failed', 
+              error: errorMessage,
+              retryCount
+            };
+            
+            // Send WebSocket notification of permanent failure
+            if (upload.conversationId) {
+              notifyUploadStatus(upload.conversationId, 'failed', { 
+                fileName: upload.fileUri.split("/").pop() || "audio.webm",
+                error: errorMessage,
+                willRetry: false
+              }).catch(e => console.error('Failed to send failure notification:', e));
+            }
+          }
+          hasChanges = true;
         }
       }
     }
@@ -251,6 +565,18 @@ export const uploadPendingFiles = async (): Promise<boolean> => {
       await AsyncStorage.setItem('uploadQueue', JSON.stringify(updatedUploads));
     }
     
+    // Schedule another run if we have any retrying uploads
+    const hasRetrying = updatedUploads.some(u => u.status === 'retrying');
+    if (hasRetrying) {
+      const soonestRetry = Math.min(...updatedUploads
+        .filter(u => u.status === 'retrying' && u.nextRetry)
+        .map(u => u.nextRetry || Infinity));
+      
+      const delay = Math.max(1000, soonestRetry - now);
+      setTimeout(() => uploadPendingFiles(), delay);
+    }
+    
+    console.log("All uploads complete");
     return hasChanges;
   } catch (error) {
     console.error('Error in uploadPendingFiles:', error);

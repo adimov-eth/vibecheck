@@ -139,3 +139,73 @@ const fetchUserProfile = async () => {
 - User data is synced automatically from Clerk on authentication
 - Subscription status checks reference the local users table
 - Usage limits are enforced based on subscription status and user ID
+
+# Database and Performance Enhancements
+
+## Database Connection Pooling
+
+- Implemented connection pooling with `better-sqlite-pool` to manage database connections efficiently
+- Configured maximum of 10 connections with 30-second timeout
+- Added SQLite optimization pragmas for better performance: 
+  - WAL journaling mode
+  - Normal synchronous mode 
+  - Increased cache and memory-mapped I/O sizes
+  - In-memory temporary storage
+
+## Query Optimization
+
+- Added indexes on most frequently queried columns across tables:
+  - `users`: email
+  - `conversations`: user_id, status, created_at
+  - `audios`: conversation_id, user_id, status
+  - `subscriptions`: user_id, is_active, expires_date
+- Created migration script to apply indexes to existing databases
+- Added compound indexes for common query patterns (e.g., user_id + status)
+
+## Transaction Handling
+
+- Improved transaction handling in user service using connection pool
+- Created test script to verify transaction isolation and rollback behavior
+- Enhanced error handling in database operations
+
+## Database Maintenance
+
+- Created optimization tasks:
+  - ANALYZE to update query planner statistics
+  - VACUUM to defragment database
+  - Integrity checks 
+  - Size reporting
+- Added scheduled maintenance system that runs at configurable times (default: 3 AM daily)
+- Graceful shutdown with proper database connection closure
+
+## Rate Limiting Enhancements
+
+- Implemented configurable rate limiting middleware
+- Adjusted limits based on endpoint sensitivity
+- Added resource-specific rate limiting for different API sections
+- Created in-memory store with automatic cleanup
+
+## Server Improvements
+
+- Added database setup and optimization during server startup
+- Improved shutdown process with proper cleanup 
+- Documentation of database performance enhancements
+
+## Usage
+
+To run database optimization manually:
+```
+pnpm run db:optimize
+```
+
+To set up the database with indexes and optimizations:
+```
+pnpm run db:setup
+```
+
+## Configuration Options
+
+Database maintenance can be configured using environment variables:
+- `ENABLE_MAINTENANCE`: Set to 'false' to disable scheduled maintenance
+- `MAINTENANCE_HOUR`: Hour of day (0-23) to run maintenance (default: 3 AM)
+- `MAINTENANCE_INTERVAL_MS`: Override interval in milliseconds
