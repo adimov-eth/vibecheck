@@ -2,7 +2,9 @@ import { db } from '../database';
 import { subscriptions } from '../database/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { log } from '../utils/logger.utils';
-import { verifyReceipt } from 'node-apple-receipt-verify';
+// Use require syntax for CommonJS module
+// @ts-ignore
+const appleReceiptVerify = require('node-apple-receipt-verify');
 import { config } from '../config';
 
 // Mapping for human-readable subscription types
@@ -35,12 +37,13 @@ export async function verifyAppleReceipt(
     
     // Configure verification settings
     const options = {
+      receipt: receiptData,
       secret: config.appleSharedSecret || '', // Optional shared secret if configured
       excludeSandbox, // Exclude sandbox environment in production
     };
     
     // Verify receipt using Apple's servers
-    const result = await verifyReceipt(receiptData, options);
+    const result = await appleReceiptVerify.validate(options);
     log(`Receipt verification status: ${result.status}`, 'info');
 
     // Handle failed verification
