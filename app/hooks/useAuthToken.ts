@@ -11,16 +11,20 @@ import { AuthTokenHook, TokenStatus, TokenMetadata, AuthError } from '../types/a
 
 // Token storage key
 const AUTH_TOKEN_KEY = 'auth_token';
-// Refresh interval in milliseconds (5 minutes)
-const TOKEN_REFRESH_INTERVAL = 5 * 60 * 1000;
+// Refresh interval in milliseconds (1 minute - more frequent to avoid problems)
+const TOKEN_REFRESH_INTERVAL = 1 * 60 * 1000;
 // Maximum number of refresh retries
-const MAX_REFRESH_RETRIES = 3;
+const MAX_REFRESH_RETRIES = 5;
+// Rate limiting - minimum time between refreshes in ms (5 seconds)
+const MIN_REFRESH_INTERVAL = 5000;
 
 // Define proper interface for the Clerk auth object to handle variations
 interface ClerkAuth {
   getToken: () => Promise<string>;
   // isSignedIn can be either a boolean or a function
   isSignedIn: boolean | (() => Promise<boolean>);
+  // Add session property
+  sessionId?: string;
 }
 
 /**
@@ -92,119 +96,102 @@ export function useAuthToken(): AuthTokenHook {
   };
 
   /**
-   * Get a fresh authentication token with enhanced error handling
-   * @param force - Whether to force refresh even if current token is valid
-   * @returns Promise resolving to the authentication token
-   * @throws Error if authentication is required or token retrieval fails
+   * Get a fresh authentication token, either from cache or by refreshing
+   * Implements rate limiting and prevents concurrent requests
    */
-  const getFreshToken = useCallback(async (force = false): Promise<string> => {
-    // Throttle requests - don't allow multiple refreshes within 500ms
+  const getFreshToken = useCallback(async (): Promise<string> => {
     const now = Date.now();
-    const minRefreshInterval = 500; // milliseconds
     
-    // If a refresh is already in progress, return the existing promise
-    // instead of throwing an error
-    if (!force && isRefreshing && refreshPromise.current) {
-      return refreshPromise.current;
-    }
-    
-    // Rate limiting for token requests
-    if (
-      !force && 
-      now - lastRefreshAttempt.current < minRefreshInterval
-    ) {
-      console.warn('Token refresh rate limited');
-      throw new Error('Token refresh rate limited, try again shortly');
-    }
-    
-    // Update rate limiting timestamp
-    lastRefreshAttempt.current = now;
-
-    // Create a new refresh promise
-    refreshPromise.current = (async () => {
-      try {
-        setIsRefreshing(true);
-        setLastError(undefined);
-        
-        // Check if we can use cached token
-        if (!force && tokenStatus === 'valid' && tokenExpiryTime && !isTokenExpiringSoon(tokenExpiryTime)) {
-          // Get the token from storage directly if it's valid and not expiring soon
-          const cachedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-          if (cachedToken) {
-            return cachedToken;
-          }
-        }
-        
-        // Get a fresh token from authentication provider
-        const token = await getToken();
-        
-        if (!token) {
-          setTokenStatus('invalid');
-          throw new Error('Authentication required');
-        }
-        
-        // Parse token metadata for better caching
-        const tokenData = parseTokenData(token);
-        
-        // Store token and metadata
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
-        
-        if (tokenData?.expiryTime) {
-          setTokenExpiryTime(tokenData.expiryTime);
-        }
-        
-        setTokenStatus('valid');
-        // Reset retry count on success
-        setRetryCount(0);
-        
-        return token;
-      } catch (error) {
-        // Enhanced error handling with structured errors
-        let errorCode = 'unknown_error';
-        let authError: Error;
-        
-        if (error instanceof Error) {
-          // Extract error code if possible
-          const errorMessage = error.message.toLowerCase();
-          
-          // Map common error patterns to structured error codes
-          if (errorMessage.includes('expired')) {
-            errorCode = 'token_expired';
-            setTokenStatus('expired');
-          } else if (errorMessage.includes('invalid')) {
-            errorCode = 'token_invalid';
-            setTokenStatus('invalid');
-          } else if (errorMessage.includes('authentication required')) {
-            errorCode = 'auth_required';
-            setTokenStatus('invalid');
-          } else if (errorMessage.includes('network')) {
-            errorCode = 'network_error';
-            // Don't invalidate token for network errors
-          }
-          
-          // Create enhanced error with code
-          authError = new AuthError(error.message, errorCode);
-        } else {
-          authError = new AuthError('Failed to get token', errorCode);
-        }
-        
-        // Track the error for UI feedback
-        setLastError(authError);
-        
-        // Handle critical auth errors that should trigger logout
-        if (['token_invalid', 'auth_required'].includes(errorCode)) {
-          await handleInvalidToken();
-        }
-        
-        throw authError;
-      } finally {
-        setIsRefreshing(false);
-        refreshPromise.current = null;
+    // Rate limiting check - don't refresh more than once per 5 seconds
+    const timeSinceLastRefresh = now - lastRefreshAttempt.current;
+    if (isRefreshing && timeSinceLastRefresh < MIN_REFRESH_INTERVAL) {
+      if (refreshPromise.current) {
+        return refreshPromise.current;
       }
-    })();
-
-    return refreshPromise.current;
-  }, [getToken, tokenStatus, tokenExpiryTime, isRefreshing]);
+      throw new Error('Token refresh rate limited');
+    }
+    
+    try {
+      // Update refresh timestamp and status
+      lastRefreshAttempt.current = now;
+      setIsRefreshing(true);
+      
+      // Create a new refresh promise
+      refreshPromise.current = (async () => {
+        // First try to load cached token and validate
+        try {
+          const cachedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+          
+          if (cachedToken) {
+            const tokenData = parseTokenData(cachedToken);
+            
+            // If token exists and is not expired (with 30s buffer), return it
+            if (tokenData && tokenData.expiryTime && tokenData.expiryTime - now > 30000) {
+              setTokenStatus('valid');
+              setTokenExpiryTime(tokenData.expiryTime);
+              // Reset error state on success
+              setLastError(undefined);
+              return cachedToken;
+            }
+          }
+        } catch (cacheError) {
+          console.warn('Error reading cached token:', cacheError);
+        }
+        
+        // If we get here, we need a fresh token
+        try {
+          // Get new token from Clerk
+          const newToken = await getToken();
+          
+          if (newToken) {
+            // Save token to AsyncStorage
+            await AsyncStorage.setItem(AUTH_TOKEN_KEY, newToken);
+            
+            // Parse and set token metadata
+            const tokenData = parseTokenData(newToken);
+            if (tokenData?.expiryTime) {
+              setTokenExpiryTime(tokenData.expiryTime);
+            }
+            
+            setTokenStatus('valid');
+            setRetryCount(0);  // Reset retry count on success
+            setLastError(undefined);
+            
+            return newToken;
+          } else {
+            throw new Error('Failed to get token from auth provider');
+          }
+        } catch (tokenError) {
+          // Increment retry count for exponential backoff
+          setRetryCount((prev) => prev + 1);
+          
+          if (retryCount >= MAX_REFRESH_RETRIES) {
+            setTokenStatus('invalid');
+            handleInvalidToken();
+            throw new Error(
+              `Failed to refresh token after ${MAX_REFRESH_RETRIES} attempts: ${
+                tokenError instanceof Error ? tokenError.message : String(tokenError)
+              }`
+            );
+          }
+          
+          // Rethrow to trigger retry mechanism
+          throw tokenError;
+        }
+      })();
+      
+      return await refreshPromise.current;
+    } catch (error) {
+      const errorMessage = `Token refresh failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      setLastError(error instanceof Error ? error : new Error(errorMessage));
+      throw error;
+    } finally {
+      setIsRefreshing(false);
+      refreshPromise.current = null;
+    }
+  }, [getToken, parseTokenData, retryCount]);
 
   /**
    * Handle an invalid or revoked token
@@ -417,6 +404,7 @@ export function useAuthToken(): AuthTokenHook {
     getFreshToken,
     isRefreshing,
     lastError,
+    retryCount,
     clearToken,
     validateToken,
     tokenStatus

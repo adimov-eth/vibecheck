@@ -1,4 +1,4 @@
-import { useUser, useClerk } from '@clerk/clerk-expo'
+import { useUser as useClerkUser, useClerk } from '@clerk/clerk-expo'
 import { useLocalCredentials } from '@clerk/clerk-expo/local-credentials'
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, Alert } from 'react-native'
 import { router } from 'expo-router'
@@ -7,23 +7,32 @@ import { Ionicons } from '@expo/vector-icons'
 import AppBar from '../components/AppBar'
 import Button from '../components/Button'
 import { ClearCacheButton } from '../components/ClearCacheButton'
+import { UserProfileCard } from '../components/UserProfileCard'
 import { colors, typography, spacing, layout } from './styles'
 import { useUsage } from '../contexts/UsageContext'
 import { useSubscription } from '../contexts/SubscriptionContext'
 import { useSubscriptionCheck } from '../hooks/useSubscriptionCheck'
 
 export default function Page() {
-  const { user } = useUser()
+  const { user } = useClerkUser()
   const { signOut } = useClerk()
   const [isLoading, setIsLoading] = useState(false)
   
   const { userOwnsCredentials, clearCredentials } = useLocalCredentials()
   const { usageStats, isLoading: usageLoading, refreshUsage } = useUsage()
-  const { isSubscribed, subscriptionInfo } = useSubscription()
+  const { isSubscribed, subscriptionInfo, checkSubscriptionStatus } = useSubscription()
   const { getSubscriptionDetails, openSubscriptionSettings } = useSubscriptionCheck()
 
   // Get formatted subscription details
   const subscriptionDetails = getSubscriptionDetails()
+
+  // Handle refreshing all data
+  const handleRefreshAll = async () => {
+    await Promise.all([
+      refreshUsage(),
+      checkSubscriptionStatus()
+    ]);
+  };
 
   const handleSignOut = async () => {
     setIsLoading(true)
@@ -208,6 +217,9 @@ export default function Page() {
             )}
           </View>
         </View>
+
+        {/* New User Profile Card */}
+        <UserProfileCard onRefresh={handleRefreshAll} />
       </ScrollView>
     </SafeAreaView>
   )
