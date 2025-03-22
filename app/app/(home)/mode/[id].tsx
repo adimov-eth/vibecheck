@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { SafeAreaView, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors } from '../../styles';
@@ -30,23 +30,27 @@ export default function ModePage() {
     color: color as string,
   };
 
-  const handleGoBack = () => {
+  const handleGoBack = useCallback(() => {
     if (screen === 'results') {
       setScreen('recording');
       setResults(null);
     } else {
       router.back();
     }
-  };
+  }, [screen, router]);
 
-  const handleRecordingComplete = () => {
+  const handleRecordingComplete = useCallback(() => {
     console.log('Mode page: handleRecordingComplete called');
     setIsProcessing(true);
     
     // Change screen immediately since we want to show the processing UI right away
     console.log('Mode page: Changing screen to results');
     setScreen('results');
-  };
+  }, []);
+
+  const handleNewRecording = useCallback(() => {
+    setScreen('recording');
+  }, []);
 
   // If any required param is missing, go back to home
   if (!id || !title || !description || !color) {
@@ -56,20 +60,18 @@ export default function ModePage() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {screen === 'recording' && (
+      {screen === 'recording' ? (
         <RecordingScreen
           selectedMode={selectedMode}
           onGoBack={handleGoBack}
           onRecordingComplete={handleRecordingComplete}
-          onNewRecording={() => setScreen('recording')}
+          onNewRecording={handleNewRecording}
         />
-      )}
-      {screen === 'results' && (
+      ) : (
         <ResultsScreen
           selectedMode={selectedMode}
           onGoBack={handleGoBack}
-          onRecordingComplete={handleRecordingComplete}
-          onNewRecording={() => setScreen('recording')}
+          onNewRecording={handleNewRecording}
         />
       )}
     </SafeAreaView>

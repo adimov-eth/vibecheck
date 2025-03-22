@@ -16,6 +16,13 @@ const TOKEN_REFRESH_INTERVAL = 5 * 60 * 1000;
 // Maximum number of refresh retries
 const MAX_REFRESH_RETRIES = 3;
 
+// Define proper interface for the Clerk auth object to handle variations
+interface ClerkAuth {
+  getToken: () => Promise<string>;
+  // isSignedIn can be either a boolean or a function
+  isSignedIn: boolean | (() => Promise<boolean>);
+}
+
 /**
  * Custom hook for managing authentication tokens
  * Provides methods to get fresh tokens and handles automatic token refreshing
@@ -23,7 +30,8 @@ const MAX_REFRESH_RETRIES = 3;
  * @returns AuthTokenHook interface with token management functions
  */
 export function useAuthToken(): AuthTokenHook {
-  const auth = useAuth() as { getToken: () => Promise<string>; isSignedIn?: () => Promise<boolean> };
+  // Use the proper type for the auth object
+  const auth = useAuth() as unknown as ClerkAuth;
   const { getToken } = auth;
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [lastError, setLastError] = useState<Error | undefined>(undefined);
@@ -33,6 +41,8 @@ export function useAuthToken(): AuthTokenHook {
   const [tokenExpiryTime, setTokenExpiryTime] = useState<number | null>(null);
   // For optimization and rate limiting purposes
   const lastRefreshAttempt = useRef<number>(0);
+  // Add a promise ref to track ongoing token refreshes
+  const refreshPromise = useRef<Promise<string> | null>(null);
   const router = useRouter();
 
   /**
@@ -92,8 +102,10 @@ export function useAuthToken(): AuthTokenHook {
     const now = Date.now();
     const minRefreshInterval = 500; // milliseconds
     
-    if (!force && isRefreshing) {
-      throw new Error('Token refresh already in progress');
+    // If a refresh is already in progress, return the existing promise
+    // instead of throwing an error
+    if (!force && isRefreshing && refreshPromise.current) {
+      return refreshPromise.current;
     }
     
     // Rate limiting for token requests
@@ -108,85 +120,90 @@ export function useAuthToken(): AuthTokenHook {
     // Update rate limiting timestamp
     lastRefreshAttempt.current = now;
 
-    try {
-      setIsRefreshing(true);
-      setLastError(undefined);
-      
-      // Check if we can use cached token
-      if (!force && tokenStatus === 'valid' && tokenExpiryTime && !isTokenExpiringSoon(tokenExpiryTime)) {
-        // Get the token from storage directly if it's valid and not expiring soon
-        const cachedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-        if (cachedToken) {
-          setIsRefreshing(false);
-          return cachedToken;
-        }
-      }
-      
-      // Get a fresh token from authentication provider
-      const token = await getToken();
-      
-      if (!token) {
-        setTokenStatus('invalid');
-        throw new Error('Authentication required');
-      }
-      
-      // Parse token metadata for better caching
-      const tokenData = parseTokenData(token);
-      
-      // Store token and metadata
-      await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
-      
-      if (tokenData?.expiryTime) {
-        setTokenExpiryTime(tokenData.expiryTime);
-      }
-      
-      setTokenStatus('valid');
-      // Reset retry count on success
-      setRetryCount(0);
-      
-      return token;
-    } catch (error) {
-      // Enhanced error handling with structured errors
-      let errorCode = 'unknown_error';
-      let authError: Error;
-      
-      if (error instanceof Error) {
-        // Extract error code if possible
-        const errorMessage = error.message.toLowerCase();
+    // Create a new refresh promise
+    refreshPromise.current = (async () => {
+      try {
+        setIsRefreshing(true);
+        setLastError(undefined);
         
-        // Map common error patterns to structured error codes
-        if (errorMessage.includes('expired')) {
-          errorCode = 'token_expired';
-          setTokenStatus('expired');
-        } else if (errorMessage.includes('invalid')) {
-          errorCode = 'token_invalid';
-          setTokenStatus('invalid');
-        } else if (errorMessage.includes('authentication required')) {
-          errorCode = 'auth_required';
-          setTokenStatus('invalid');
-        } else if (errorMessage.includes('network')) {
-          errorCode = 'network_error';
-          // Don't invalidate token for network errors
+        // Check if we can use cached token
+        if (!force && tokenStatus === 'valid' && tokenExpiryTime && !isTokenExpiringSoon(tokenExpiryTime)) {
+          // Get the token from storage directly if it's valid and not expiring soon
+          const cachedToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+          if (cachedToken) {
+            return cachedToken;
+          }
         }
         
-        // Create enhanced error with code
-        authError = new AuthError(error.message, errorCode);
-      } else {
-        authError = new AuthError('Failed to get token', errorCode);
+        // Get a fresh token from authentication provider
+        const token = await getToken();
+        
+        if (!token) {
+          setTokenStatus('invalid');
+          throw new Error('Authentication required');
+        }
+        
+        // Parse token metadata for better caching
+        const tokenData = parseTokenData(token);
+        
+        // Store token and metadata
+        await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
+        
+        if (tokenData?.expiryTime) {
+          setTokenExpiryTime(tokenData.expiryTime);
+        }
+        
+        setTokenStatus('valid');
+        // Reset retry count on success
+        setRetryCount(0);
+        
+        return token;
+      } catch (error) {
+        // Enhanced error handling with structured errors
+        let errorCode = 'unknown_error';
+        let authError: Error;
+        
+        if (error instanceof Error) {
+          // Extract error code if possible
+          const errorMessage = error.message.toLowerCase();
+          
+          // Map common error patterns to structured error codes
+          if (errorMessage.includes('expired')) {
+            errorCode = 'token_expired';
+            setTokenStatus('expired');
+          } else if (errorMessage.includes('invalid')) {
+            errorCode = 'token_invalid';
+            setTokenStatus('invalid');
+          } else if (errorMessage.includes('authentication required')) {
+            errorCode = 'auth_required';
+            setTokenStatus('invalid');
+          } else if (errorMessage.includes('network')) {
+            errorCode = 'network_error';
+            // Don't invalidate token for network errors
+          }
+          
+          // Create enhanced error with code
+          authError = new AuthError(error.message, errorCode);
+        } else {
+          authError = new AuthError('Failed to get token', errorCode);
+        }
+        
+        // Track the error for UI feedback
+        setLastError(authError);
+        
+        // Handle critical auth errors that should trigger logout
+        if (['token_invalid', 'auth_required'].includes(errorCode)) {
+          await handleInvalidToken();
+        }
+        
+        throw authError;
+      } finally {
+        setIsRefreshing(false);
+        refreshPromise.current = null;
       }
-      
-      // Track the error for UI feedback
-      setLastError(authError);
-      
-      // Handle critical auth errors that should trigger logout
-      if (['token_invalid', 'auth_required'].includes(errorCode)) {
-        await handleInvalidToken();
-      }
-      
-      throw authError;
-    } finally {
-      setIsRefreshing(false);
-    }
+    })();
+
+    return refreshPromise.current;
   }, [getToken, tokenStatus, tokenExpiryTime, isRefreshing]);
 
   /**
@@ -202,8 +219,11 @@ export function useAuthToken(): AuthTokenHook {
     // Check auth state after clearing token
     let isCurrentlySignedIn = false;
     try {
-      if (auth.isSignedIn) {
+      // Check sign-in status using the proper ClerkAuth interface
+      if (typeof auth.isSignedIn === 'function') {
         isCurrentlySignedIn = await auth.isSignedIn();
+      } else {
+        isCurrentlySignedIn = !!auth.isSignedIn;
       }
     } catch (error) {
       console.warn('Error checking sign-in status:', error);
@@ -295,8 +315,11 @@ export function useAuthToken(): AuthTokenHook {
         // Don't refresh if not signed in
         let signedIn = false;
         try {
-          if (auth.isSignedIn) {
+          // Check sign-in status using the proper ClerkAuth interface
+          if (typeof auth.isSignedIn === 'function') {
             signedIn = await auth.isSignedIn();
+          } else {
+            signedIn = !!auth.isSignedIn;
           }
         } catch (error) {
           console.warn('Error checking sign-in status during refresh:', error);

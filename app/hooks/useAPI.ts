@@ -16,15 +16,25 @@ export interface AnalysisResponse {
 }
 
 export interface ConversationStatus {
-  status: 'pending' | 'completed' | 'failed';
-  gptResponse?: string;
+  status: string;
+  id: string;
+}
+
+export interface SubscriptionStatus {
+  isSubscribed: boolean;
+  subscription: {
+    type: string | null;
+    expiresDate: Date | null;
+  };
 }
 
 export interface ApiHook {
   createConversation: (id: string, mode: string, recordingType: 'separate' | 'live') => Promise<string>;
   getConversationStatus: (conversationId: string) => Promise<ConversationStatus>;
-  parseGptResponse: (gptResponse: string) => AnalysisResponse;
-  pollForResult: (conversationId: string, updateProgress: (progress: number) => void) => Promise<AnalysisResponse>;
+  getConversationResult: (conversationId: string) => Promise<AnalysisResponse>;
+  pollForResult: (conversationId: string, onComplete: (data: AnalysisResponse) => void) => () => void;
+  verifySubscriptionReceipt: (receiptData: string) => Promise<SubscriptionStatus>;
+  getSubscriptionStatus: () => Promise<SubscriptionStatus>;
 }
 
 export function useApi(): ApiHook {
@@ -74,115 +84,113 @@ export function useApi(): ApiHook {
     return await response.json() as ConversationStatus;
   }, [fetchWithRetry]);
 
-  const parseGptResponse = useCallback((gptResponse: string): AnalysisResponse => {
-    const lines = gptResponse.split('\n').filter(line => line.trim());
-    return {
-      summary: lines[0] || 'No summary provided',
-      recommendations: lines.slice(1).filter(line => line.match(/^\d+\./)).map(line => line.replace(/^\d+\.\s*/, '')) || [],
-      highlights: { partner1: [], partner2: [] },
-    };
-  }, []);
+  const getConversationResult = useCallback(async (conversationId: string) => {
+    const response = await fetchWithRetry(`${API_BASE_URL}/conversations/${conversationId}/result`, {
+      method: 'GET',
+    });
+    return await response.json() as AnalysisResponse;
+  }, [fetchWithRetry]);
 
-  // Maintain a global mapping of conversation IDs to progress values
-  const progressMap = useRef<Map<string, number>>(new Map());
-  
-  const pollForResult = useCallback(async (conversationId: string, updateProgress: (progress: number) => void) => {
-    console.log(`Starting to poll for results, conversationId: ${conversationId}`);
+  const pollForResult = useCallback((conversationId: string, onComplete: (data: AnalysisResponse) => void) => {
+    const intervalRef = { current: null as NodeJS.Timeout | null };
+    const pollCount = { current: 0 };
     
-    // Get the current progress for this conversation, or initialize it
-    let artificialProgress = progressMap.current.get(conversationId) || 5;
-    
-    // Initialize with 5% if this is the first time
-    if (artificialProgress <= 0) {
-      artificialProgress = 5;
-      updateProgress(5);
-    } else {
-      // Use the existing progress if it's higher than 5%
-      updateProgress(artificialProgress);
-    }
-    
-    progressMap.current.set(conversationId, artificialProgress);
-    
-    // Use a smaller step for smoother progress
-    const progressStep = 1;
-    
-    // A slower interval means smoother progress updates
-    const pollInterval = setInterval(() => {
-      // Get current progress from the map
-      let currentProgress = progressMap.current.get(conversationId) || artificialProgress;
-      currentProgress = Math.min(currentProgress + progressStep, 80);
-      
-      // Update both the map and the UI
-      progressMap.current.set(conversationId, currentProgress);
-      updateProgress(currentProgress);
-      
-      // Update our local variable too
-      artificialProgress = currentProgress;
-    }, 4000);
-    
-    const MAX_POLL_RETRIES = 30;
-    const BASE_POLLING_INTERVAL = 2000;
-    
-    let consecutiveErrorCount = 0;
-    const MAX_CONSECUTIVE_ERRORS = 3;
-
-    for (let retryCount = 0; retryCount < MAX_POLL_RETRIES; retryCount++) {
+    const checkResult = async () => {
       try {
-        console.log(`Polling attempt ${retryCount + 1}/${MAX_POLL_RETRIES} for conversation ${conversationId}`);
-        const { status, gptResponse } = await getConversationStatus(conversationId);
+        const { status } = await getConversationStatus(conversationId);
         
-        // Reset error counter on successful request
-        consecutiveErrorCount = 0;
-        
-        if (status === 'completed' && gptResponse) {
-          console.log(`Conversation ${conversationId} completed with response`);
-          clearInterval(pollInterval);
-          updateProgress(100);
-          return parseGptResponse(gptResponse);
+        pollCount.current += 1;
+        if (pollCount.current % 5 === 0) {
+          console.log(`Polling for results (attempt ${pollCount.current})...`);
         }
         
-        if (status === 'failed') {
-          console.log(`Conversation ${conversationId} failed`);
-          clearInterval(pollInterval);
-          throw new Error('Conversation processing failed');
+        if (status === 'completed') {
+          const result = await getConversationResult(conversationId);
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+          onComplete(result);
         }
-        
-        // Status-based progress updates only considered for smooth progression
-        // Instead of jumping to 50%, gradually increase to that point
-        if ( status === 'pending' && artificialProgress < 50) {
-          // Move more quickly toward 50% but don't jump
-          artificialProgress = Math.min(artificialProgress + 10, 49);
-          updateProgress(artificialProgress);
-        } else if (status === 'completed' && artificialProgress < 70) {
-          // Move more quickly toward 70% but don't jump
-          artificialProgress = Math.min(artificialProgress + 15, 69);
-          updateProgress(artificialProgress);
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, BASE_POLLING_INTERVAL));
       } catch (error) {
-        console.error(`Polling error (attempt ${retryCount + 1}/${MAX_POLL_RETRIES}):`, error);
-        
-        consecutiveErrorCount++;
-        if (consecutiveErrorCount >= MAX_CONSECUTIVE_ERRORS) {
-          console.log(`Too many consecutive errors (${consecutiveErrorCount}), aborting polling`);
-          clearInterval(pollInterval);
-          throw new Error('Too many consecutive errors');
-        }
-        
-        if (retryCount === MAX_POLL_RETRIES - 1) {
-          clearInterval(pollInterval);
-          throw new Error('Max polling attempts reached');
-        }
-        
-        // Backoff on errors
-        await new Promise(resolve => setTimeout(resolve, BASE_POLLING_INTERVAL * 2));
+        console.error('Error polling for results:', error);
       }
+    };
+    
+    intervalRef.current = setInterval(checkResult, 3000);
+    
+    // Return cleanup function
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [getConversationStatus, getConversationResult]);
+
+  // Verify a subscription receipt with the server
+  const verifySubscriptionReceipt = useCallback(async (receiptData: string): Promise<SubscriptionStatus> => {
+    try {
+      const response = await fetchWithRetry(`${API_BASE_URL}/subscriptions/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ receiptData }),
+      });
+      
+      const result = await response.json();
+      
+      return {
+        isSubscribed: result.success,
+        subscription: {
+          type: result.subscription?.type || null,
+          expiresDate: result.subscription?.expiresDate ? new Date(result.subscription.expiresDate) : null,
+        },
+      };
+    } catch (error) {
+      console.error('Receipt verification error:', error);
+      return {
+        isSubscribed: false,
+        subscription: {
+          type: null,
+          expiresDate: null,
+        },
+      };
     }
+  }, [fetchWithRetry]);
 
-    clearInterval(pollInterval);
-    throw new Error('Max polling attempts reached without completion');
-  }, [getConversationStatus, parseGptResponse]);
+  // Get current subscription status
+  const getSubscriptionStatus = useCallback(async (): Promise<SubscriptionStatus> => {
+    try {
+      const response = await fetchWithRetry(`${API_BASE_URL}/subscriptions/status`, {
+        method: 'GET',
+      });
+      
+      const result = await response.json();
+      
+      return {
+        isSubscribed: result.isSubscribed,
+        subscription: {
+          type: result.subscription?.type || null,
+          expiresDate: result.subscription?.expiresDate ? new Date(result.subscription.expiresDate) : null,
+        },
+      };
+    } catch (error) {
+      console.error('Subscription status error:', error);
+      return {
+        isSubscribed: false,
+        subscription: {
+          type: null,
+          expiresDate: null,
+        },
+      };
+    }
+  }, [fetchWithRetry]);
 
-  return { createConversation, getConversationStatus, parseGptResponse, pollForResult };
+  return {
+    createConversation,
+    getConversationStatus,
+    getConversationResult,
+    pollForResult,
+    verifySubscriptionReceipt,
+    getSubscriptionStatus,
+  };
 }

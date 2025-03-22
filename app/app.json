@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "viber",
-    "slug": "viber",
+    "name": "vibecheck",
+    "slug": "vibecheck",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -9,13 +9,19 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.adimov.vibecheck"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.adimov.vibecheck"
     },
     "web": {
       "bundler": "metro",
@@ -23,6 +29,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "react-native-iap",
       "expo-router",
       [
         "expo-splash-screen",
@@ -33,7 +40,8 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      ["expo-av",
+      [
+        "expo-av",
         {
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
         }
@@ -41,6 +49,15 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "e4b31cdd-792b-423d-985a-f946e5de6768"
+      }
+    },
+    "owner": "adimov"
   }
 }

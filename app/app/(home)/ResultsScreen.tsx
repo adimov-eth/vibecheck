@@ -33,22 +33,28 @@ export default function ResultsScreen({ selectedMode, onGoBack, onNewRecording }
   const { pollForResult } = useApi();
 
   // Keep track if we've already fetched results to avoid multiple polls
-  const [hasFetchedResults, setHasFetchedResults] = useState(false);
+  const hasPolledRef = useRef(false);
 
   // Track if we've started a poll for this specific conversation
   const hasStartedPollingRef = useRef<string | null>(null);
 
+  // Use a ref instead of state to avoid rerender triggers
+  const loggedFetchSkipRef = useRef(false);
+
   useEffect(() => {
     // Don't fetch again if we've already got results for this conversation
-    if (analysisResult || hasFetchedResults) {
-      console.log('Results already fetched or available, skipping fetch');
+    if (analysisResult || hasPolledRef.current) {
+      // Only log this once to avoid console spam
+      if (!loggedFetchSkipRef.current) {
+        console.log('Results already fetched or available, skipping fetch');
+        loggedFetchSkipRef.current = true;
+      }
       setIsLoading(false);
       return;
     }
     
     // Check if we've already started polling for this specific conversation
     if (conversationId && hasStartedPollingRef.current === conversationId) {
-      console.log(`Already polling for conversation ${conversationId}, continuing to wait`);
       return;
     }
     
@@ -76,7 +82,6 @@ export default function ResultsScreen({ selectedMode, onGoBack, onNewRecording }
           }
           
           const result = await pollForResult(conversationId, (progress) => {
-            console.log(`Polling progress: ${progress}%`);
             // Only update if the new progress is higher than current progress
             if (isMounted && progress > processingProgress) {
               setProcessingProgress(progress);
@@ -85,7 +90,7 @@ export default function ResultsScreen({ selectedMode, onGoBack, onNewRecording }
           
           if (isMounted) {
             console.log('Results loaded successfully:', result);
-            setHasFetchedResults(true);
+            hasPolledRef.current = true;
             setAnalysisResult(result);
             setIsLoading(false);
           }
@@ -105,7 +110,8 @@ export default function ResultsScreen({ selectedMode, onGoBack, onNewRecording }
     }, 500); // Give context time to update
     
     return () => clearTimeout(timer);
-  }, [conversationId, pollForResult, setAnalysisResult, analysisResult, hasFetchedResults, processingProgress, setProcessingProgress]);
+  // Reduced dependency array to minimize reruns
+  }, [conversationId, analysisResult, setAnalysisResult, setProcessingProgress]);
 
   const renderLoadingState = () => (
     <View style={styles.loadingContainer}>

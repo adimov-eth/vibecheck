@@ -11,6 +11,7 @@ export interface AudioRecordingHook {
     startRecording: () => Promise<void>;
     stopRecording: (conversationId: string, partnerPrefix: string) => Promise<string | null>;
     releaseRecordings: () => Promise<void>;
+    hasBeenReleased: boolean;
   }
 
 export function useAudioRecording(): AudioRecordingHook {
@@ -20,14 +21,24 @@ export function useAudioRecording(): AudioRecordingHook {
   const [recordingStatus, setRecordingStatus] = useState('');
   const isUnloadingRef = useRef(false);
   const savedRecordingsRef = useRef<Audio.Recording[]>([]);
+  const hasBeenReleasedRef = useRef(false);
+  // Keep track of release state in state as well for components to check
+  const [hasBeenReleased, setHasBeenReleased] = useState(false);
 
   useEffect(() => {
     (async () => {
       await requestPermissions();
     })();
     
-    // No automatic cleanup of recordings
-    return () => {};
+    // Reset the released flag when the component mounts
+    hasBeenReleasedRef.current = false;
+    setHasBeenReleased(false);
+    
+    return () => {
+      // Make sure the release flag persists across re-renders
+      hasBeenReleasedRef.current = true;
+      setHasBeenReleased(true);
+    };
   }, []);
 
   const requestPermissions = async () => {
@@ -55,6 +66,10 @@ export function useAudioRecording(): AudioRecordingHook {
       await requestPermissions();
       if (!isPermissionGranted) return;
     }
+    
+    // Reset the released flag when starting a new recording
+    hasBeenReleasedRef.current = false;
+    setHasBeenReleased(false);
     
     try {
       // Create a new recording without stopping the previous one
@@ -110,13 +125,24 @@ export function useAudioRecording(): AudioRecordingHook {
 
   // New method to explicitly release all recordings
   const releaseRecordings = async () => {
+    // Skip if already released to prevent multiple calls
+    if (hasBeenReleasedRef.current) {
+      console.log('Recordings have already been released, skipping');
+      return;
+    }
+    
+    // Set the flag immediately to prevent concurrent calls
+    hasBeenReleasedRef.current = true;
+    setHasBeenReleased(true);
+    
     try {
       // If there's a current recording, stop it
       if (recording && isRecording) {
         try {
           await recording.stopAndUnloadAsync();
-        } catch (err) {
-          console.log('Error stopping current recording:', err);
+        } catch (err: any) {
+          // Already unloaded or in an invalid state
+          console.log('Recording already unloaded or in invalid state:', err.message);
         }
         setRecording(null);
         setIsRecording(false);
@@ -133,18 +159,26 @@ export function useAudioRecording(): AudioRecordingHook {
         try {
           if (savedRecording) {
             // Check if the recording is in a state where it can be unloaded
-            const uri = savedRecording.getURI();
-            if (uri) {
-              await savedRecording.stopAndUnloadAsync();
+            try {
+              const uri = savedRecording.getURI();
+              if (uri) {
+                await savedRecording.stopAndUnloadAsync();
+              }
+            } catch (err: any) {
+              // Skip if already unloaded or in invalid state
+              console.log('Saved recording already unloaded or in invalid state');
             }
           }
-        } catch (err) {
-          console.log('Error unloading saved recording:', err);
+        } catch (err: any) {
+          console.log('Error handling saved recording:', err.message);
         }
       }
       
+      console.log('All recordings successfully released');
+      
     } catch (error) {
       console.error('Error releasing recordings:', error);
+      // Still mark as released even in case of error
     }
   };
 
@@ -154,6 +188,7 @@ export function useAudioRecording(): AudioRecordingHook {
     recordingStatus, 
     startRecording, 
     stopRecording,
-    releaseRecordings 
+    releaseRecordings,
+    hasBeenReleased
   };
 }

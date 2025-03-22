@@ -128,3 +128,12 @@ export const layout = {
         width: '100%',
     },
 }
+
+// Default export for Expo Router compatibility
+export default {
+    colors,
+    typography,
+    spacing,
+    layout,
+    scale,
+}

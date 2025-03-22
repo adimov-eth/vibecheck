@@ -20,7 +20,7 @@ export interface ValidationResult {
  */
 export function validateEmail(email: string): ValidationResult {
   // Basic email regex pattern
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emailRegex = new RegExp('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$');
   
   if (!email.trim()) {
     return {
@@ -65,9 +65,9 @@ export function validatePassword(password: string, minLength = 8): ValidationRes
   
   // Check for moderate password strength (optional)
   // Has at least one number, one lowercase and one uppercase letter
-  const hasNumber = /\d/.test(password);
-  const hasUpperCase = /[A-Z]/.test(password);
-  const hasLowerCase = /[a-z]/.test(password);
+  const hasNumber = new RegExp('\\d').test(password);
+  const hasUpperCase = new RegExp('[A-Z]').test(password);
+  const hasLowerCase = new RegExp('[a-z]').test(password);
   
   if (!(hasNumber && hasUpperCase && hasLowerCase)) {
     return {
@@ -117,7 +117,7 @@ export function validateVerificationCode(code: string, length = 6): ValidationRe
   }
   
   // Only allow numbers
-  if (!/^\d+$/.test(code)) {
+  if (!new RegExp('^\\d+$').test(code)) {
     return {
       isValid: false,
       errorMessage: 'Verification code should contain only numbers'

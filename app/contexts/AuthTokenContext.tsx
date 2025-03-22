@@ -2,9 +2,10 @@
  * Authentication Token Context
  * Provides authentication token state and management throughout the app
  */
-import React, { createContext, useContext, useEffect, ReactNode, useState } from 'react';
+import React, { createContext, useContext, useEffect, ReactNode, useState, useRef } from 'react';
 import { useAuthToken } from '../hooks/useAuthToken';
 import { AuthTokenContextState } from '../types/auth';
+import { useAuth } from '@clerk/clerk-expo';
 
 // Default context value
 const defaultContextValue: AuthTokenContextState = {
@@ -23,10 +24,29 @@ const AuthTokenContext = createContext<AuthTokenContextState>(defaultContextValu
 export function AuthTokenProvider({ children }: { children: ReactNode }): JSX.Element {
   const { getFreshToken, isRefreshing, lastError, clearToken } = useAuthToken();
   const [tokenState, setTokenState] = useState<AuthTokenContextState>(defaultContextValue);
+  // Track initialization attempts to prevent multiple concurrent calls
+  const isInitializing = useRef(false);
+  const { isSignedIn, isLoaded } = useAuth();
 
   // Initialize the token when the provider mounts
   useEffect(() => {
+    // Only proceed when auth is loaded
+    if (!isLoaded) return;
+
     const initToken = async (): Promise<void> => {
+      // If user is not signed in, don't try to get a token
+      if (!isSignedIn) {
+        setTokenState({
+          tokenInitialized: true,
+          errorMessage: undefined
+        });
+        return;
+      }
+      
+      // Prevent multiple concurrent initialization attempts
+      if (isInitializing.current) return;
+      
+      isInitializing.current = true;
       try {
         await getFreshToken();
         setTokenState({
@@ -42,11 +62,13 @@ export function AuthTokenProvider({ children }: { children: ReactNode }): JSX.El
           tokenInitialized: true,
           errorMessage
         });
+      } finally {
+        isInitializing.current = false;
       }
     };
 
     // Only initialize if not already initialized
-    if (!tokenState.tokenInitialized) {
+    if (!tokenState.tokenInitialized && !isRefreshing && !isInitializing.current) {
       initToken();
     }
     
@@ -54,7 +76,7 @@ export function AuthTokenProvider({ children }: { children: ReactNode }): JSX.El
     // No need for additional refresh logic here
 
     return () => {};
-  }, [getFreshToken, tokenState.tokenInitialized]);
+  }, [getFreshToken, tokenState.tokenInitialized, isRefreshing, isSignedIn, isLoaded]);
 
   // Update error state when lastError changes in the hook
   useEffect(() => {
@@ -74,9 +96,13 @@ export function AuthTokenProvider({ children }: { children: ReactNode }): JSX.El
 }
 
 /**
- * Custom hook to use the auth token context
- * @returns The current authentication token context state
+ * Hook to access the authentication token context
+ * @returns The authentication token context state
  */
 export function useAuthTokenContext(): AuthTokenContextState {
-  return useContext(AuthTokenContext);
+  const context = useContext(AuthTokenContext);
+  if (context === undefined) {
+    throw new Error('useAuthTokenContext must be used within an AuthTokenProvider');
+  }
+  return context;
 } 
