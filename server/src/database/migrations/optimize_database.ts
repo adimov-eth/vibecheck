@@ -1,6 +1,6 @@
 import { getDbConnection, closeDbConnections } from '../index';
 import { log } from '../../utils/logger.utils';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 
 /**
  * Applies performance optimizations to the SQLite database
@@ -10,11 +10,10 @@ async function optimizeDatabase() {
     log('Starting database optimization...', 'info');
     
     // Get the Drizzle DB connection
-    const dbConnection = await getDbConnection();
+    const dbConnection = getDbConnection();
     
-    // Access the underlying better-sqlite3 connection
-    // @ts-ignore - Access the underlying SQLite connection
-    const db = dbConnection.driver?.db as Database;
+    // Access the underlying SQLite connection
+    const db = dbConnection._sqliteDb as Database;
     
     if (!db) {
       throw new Error('Could not access SQLite database instance');
@@ -30,7 +29,7 @@ async function optimizeDatabase() {
     
     // Enable integrity checks
     log('Running integrity check...', 'info');
-    const integrityCheck = db.prepare('PRAGMA integrity_check;').all();
+    const integrityCheck = db.query('PRAGMA integrity_check;').all();
     if (integrityCheck.length === 1 && integrityCheck[0].integrity_check === 'ok') {
       log('Database integrity verified', 'info');
     } else {
@@ -38,8 +37,8 @@ async function optimizeDatabase() {
     }
     
     // Report database size
-    const pageSize = db.prepare('PRAGMA page_size;').get().page_size;
-    const pageCount = db.prepare('PRAGMA page_count;').get().page_count;
+    const pageSize = db.query('PRAGMA page_size;').get().page_size;
+    const pageCount = db.query('PRAGMA page_count;').get().page_count;
     const databaseSizeBytes = pageSize * pageCount;
     const databaseSizeMB = (databaseSizeBytes / (1024 * 1024)).toFixed(2);
     
@@ -47,9 +46,12 @@ async function optimizeDatabase() {
     log(`Page size: ${pageSize} bytes, Page count: ${pageCount}`, 'info');
     
     // Additional optimizations for future queries
-    db.pragma('optimize');
+    db.exec('PRAGMA optimize;');
     
     log('Database optimization completed successfully', 'info');
+
+    // Release the connection back to the pool
+    dbConnection.release();
   } catch (error) {
     log(`Error during database optimization: ${error}`, 'error');
     throw error;
@@ -59,7 +61,7 @@ async function optimizeDatabase() {
 }
 
 // When this script is executed directly
-if (require.main === module) {
+if (import.meta.main) {
   optimizeDatabase()
     .then(() => {
       log('Optimization completed successfully', 'info');
@@ -71,4 +73,4 @@ if (require.main === module) {
     });
 }
 
-export default optimizeDatabase; 
+export default optimizeDatabase;

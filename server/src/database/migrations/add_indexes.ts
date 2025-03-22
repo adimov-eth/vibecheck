@@ -1,17 +1,16 @@
 import { getDbConnection, closeDbConnections } from '../index';
 import { log } from '../../utils/logger.utils';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 
 async function addIndexes() {
   try {
     log('Starting database index creation migration...', 'info');
     
     // Get the Drizzle DB connection
-    const dbConnection = await getDbConnection();
+    const dbConnection = getDbConnection();
     
-    // Access the underlying better-sqlite3 connection
-    // @ts-ignore - Access the private _instance property to get the SQLite connection
-    const db = dbConnection.driver?.db as Database;
+    // Access the underlying SQLite connection
+    const db = dbConnection._sqliteDb as Database;
     
     if (!db) {
       throw new Error('Could not access SQLite database instance');
@@ -39,13 +38,16 @@ async function addIndexes() {
     
     // Enable WAL mode for better concurrent access
     log('Enabling WAL mode for better performance...', 'info');
-    db.pragma('journal_mode = WAL');
-    db.pragma('synchronous = NORMAL');
-    db.pragma('cache_size = -64000'); // 64MB cache
-    db.pragma('mmap_size = 536870912'); // 512MB mmap
-    db.pragma('temp_store = MEMORY');
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA synchronous = NORMAL');
+    db.exec('PRAGMA cache_size = -64000'); // 64MB cache
+    db.exec('PRAGMA mmap_size = 536870912'); // 512MB mmap
+    db.exec('PRAGMA temp_store = MEMORY');
     
     log('Database optimization migration completed successfully', 'info');
+
+    // Release the connection back to the pool
+    dbConnection.release();
   } catch (error) {
     log(`Error during database optimization migration: ${error}`, 'error');
     throw error;
@@ -55,7 +57,7 @@ async function addIndexes() {
 }
 
 // When this script is executed directly
-if (require.main === module) {
+if (import.meta.main) {
   addIndexes()
     .then(() => {
       log('Migration completed successfully', 'info');
@@ -67,4 +69,4 @@ if (require.main === module) {
     });
 }
 
-export default addIndexes; 
+export default addIndexes;
