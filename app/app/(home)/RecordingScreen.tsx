@@ -16,6 +16,7 @@ import { useUpload, UploadHook } from '../../hooks/useUpload';
 import { useApi, ApiHook } from '../../hooks/useAPI';
 import { useSubscriptionCheck } from '../../hooks/useSubscriptionCheck';
 import { router } from 'expo-router';
+import { useUsage } from '../../contexts/UsageContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -48,6 +49,7 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
   const { uploadAudio, pollForStatus, isUploading }: UploadHook = useUpload();
   const { createConversation, getConversationStatus, pollForResult }: ApiHook = useApi();
   const { canAccessPremiumFeature } = useSubscriptionCheck();
+  const { checkCanCreateConversation, usageStats, remainingConversationsText } = useUsage();
 
   // Track whether the cleanup process has already been initiated
   const cleanupInitiatedRef = useRef(false);
@@ -107,6 +109,13 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
       setIsProcessing(false);
     } else {
       if (currentPartner === 1) {
+        // Check usage limits before creating a new conversation
+        const canCreate = await checkCanCreateConversation(true);
+        if (!canCreate) {
+          // User has reached limit and alert was shown
+          return;
+        }
+        
         clearRecordings();
         const newConversationId = Crypto.randomUUID();
         setConversationIdState(newConversationId);
@@ -242,6 +251,35 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
     }
   };
 
+  const renderUsageIndicator = () => {
+    if (!usageStats) return null;
+    
+    const isSubscribed = usageStats.isSubscribed;
+    const limitReached = !isSubscribed && usageStats.remainingConversations <= 0;
+    
+    return (
+      <View style={styles.usageIndicator}>
+        <Text style={[
+          styles.usageText, 
+          isSubscribed ? styles.unlimitedText : (limitReached ? styles.limitReachedText : {})
+        ]}>
+          {isSubscribed ? '∞ Unlimited' : 
+           (usageStats.remainingConversations > 0 ? 
+             `${usageStats.remainingConversations} conversations left` : 
+             'No conversations left')}
+        </Text>
+        {!isSubscribed && (
+          <TouchableOpacity 
+            style={styles.upgradeButton}
+            onPress={() => router.push('/paywall' as any)}
+          >
+            <Text style={styles.upgradeText}>Upgrade</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
@@ -263,6 +301,7 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
             />
           </View>
           <View style={styles.divider} />
+          {renderUsageIndicator()}
           <View style={styles.controlsContainer}>
             <View style={styles.toggleContainer}>
               <View style={styles.modeLabel}>
@@ -353,5 +392,38 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.background,
+  },
+  usageIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: layout.borderRadius.medium,
+  },
+  usageText: {
+    ...typography.body2,
+    color: colors.mediumText,
+  },
+  unlimitedText: {
+    color: colors.success,
+    fontWeight: '600',
+  },
+  limitReachedText: {
+    color: colors.error,
+    fontWeight: '600',
+  },
+  upgradeButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: layout.borderRadius.small,
+  },
+  upgradeText: {
+    ...typography.caption,
+    color: colors.white,
+    fontWeight: '600',
   },
 });

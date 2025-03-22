@@ -1,4 +1,4 @@
-# viber_server
+# vibecheck_server
 
 To install dependencies:
 

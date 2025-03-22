@@ -28,6 +28,18 @@ export interface SubscriptionStatus {
   };
 }
 
+export interface UsageStats {
+  currentUsage: number;
+  limit: number;
+  isSubscribed: boolean;
+  remainingConversations: number;
+  resetDate: Date | null;
+}
+
+export interface UsageResponse {
+  usage: UsageStats;
+}
+
 export interface ApiHook {
   createConversation: (id: string, mode: string, recordingType: 'separate' | 'live') => Promise<string>;
   getConversationStatus: (conversationId: string) => Promise<ConversationStatus>;
@@ -35,6 +47,7 @@ export interface ApiHook {
   pollForResult: (conversationId: string, onComplete: (data: AnalysisResponse) => void) => () => void;
   verifySubscriptionReceipt: (receiptData: string) => Promise<SubscriptionStatus>;
   getSubscriptionStatus: () => Promise<SubscriptionStatus>;
+  getUserUsageStats: () => Promise<UsageStats>;
 }
 
 export function useApi(): ApiHook {
@@ -185,6 +198,33 @@ export function useApi(): ApiHook {
     }
   }, [fetchWithRetry]);
 
+  // Get user's usage statistics
+  const getUserUsageStats = useCallback(async (): Promise<UsageStats> => {
+    try {
+      const response = await fetchWithRetry(`${API_BASE_URL}/usage/stats`, {
+        method: 'GET',
+      });
+      
+      const result = await response.json() as UsageResponse;
+      
+      // Transform the resetDate from string to Date object if it exists
+      return {
+        ...result.usage,
+        resetDate: result.usage.resetDate ? new Date(result.usage.resetDate) : null
+      };
+    } catch (error) {
+      console.error('Error fetching usage stats:', error);
+      // Return default values in case of error
+      return {
+        currentUsage: 0,
+        limit: 0,
+        isSubscribed: false,
+        remainingConversations: 0,
+        resetDate: null
+      };
+    }
+  }, [fetchWithRetry]);
+
   return {
     createConversation,
     getConversationStatus,
@@ -192,5 +232,6 @@ export function useApi(): ApiHook {
     pollForResult,
     verifySubscriptionReceipt,
     getSubscriptionStatus,
+    getUserUsageStats,
   };
 }
