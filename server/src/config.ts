@@ -9,4 +9,26 @@ export const config = {
     port: Number(process.env.REDIS_PORT) || 6379,
   },
   uploadsDir: './uploads',
+  
+  // WebSocket configuration
+  webSocket: {
+    enabled: process.env.ENABLE_WEBSOCKET !== 'false',
+    path: '/ws',
+    pingInterval: 30000, // 30 seconds
+  },
+  
+  // Rate limiting configuration
+  rateLimit: {
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    maxRequestsPerWindow: {
+      default: 100,
+      auth: 20,
+      conversations: 60,
+      audio: 30,
+      subscriptions: 20,
+      usage: 30,
+      users: 30,
+    },
+    message: 'Too many requests, please try again later',
+  },
 };
