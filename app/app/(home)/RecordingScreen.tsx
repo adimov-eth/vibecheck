@@ -47,9 +47,9 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
   const { setConversationId, clearRecordings, setRecordingData } = useRecording();
   const { isRecording, recordingStatus, startRecording, stopRecording, releaseRecordings, hasBeenReleased }: AudioRecordingHook = useAudioRecording();
   const { uploadAudio, pollForStatus, isUploading }: UploadHook = useUpload();
-  const { createConversation, getConversationStatus, pollForResult }: ApiHook = useApi();
+  const { createConversation }: ApiHook = useApi();
   const { canAccessPremiumFeature } = useSubscriptionCheck();
-  const { checkCanCreateConversation, usageStats, remainingConversationsText } = useUsage();
+  const { checkCanCreateConversation, usageStats } = useUsage();
 
   // Track whether the cleanup process has already been initiated
   const cleanupInitiatedRef = useRef(false);
@@ -237,19 +237,6 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
   };
 
   // Example function to handle a premium feature
-  const handlePremiumFeature = async () => {
-    // Check if user can access premium feature
-    const canAccess = await canAccessPremiumFeature(true, () => {
-      // This callback will be called if user wants to subscribe
-      router.push("/paywall" as any);
-    });
-    
-    if (canAccess) {
-      // User has subscription, allow premium feature
-      console.log('User has subscription, allow premium feature');
-      // Implement premium feature here
-    }
-  };
 
   const renderUsageIndicator = () => {
     if (!usageStats) return null;

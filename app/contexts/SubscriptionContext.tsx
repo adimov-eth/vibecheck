@@ -4,13 +4,12 @@ import React, {
   useEffect,
   useState,
   ReactNode,
+  useRef,
 } from 'react';
 import {
   initConnection,
   endConnection,
   getSubscriptions,
-  getAvailablePurchases,
-  getPurchaseHistory,
   purchaseErrorListener,
   purchaseUpdatedListener,
   finishTransaction,
@@ -87,9 +86,9 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
   // Connection state
   const [isConnected, setIsConnected] = useState<boolean>(false);
   
-  // Purchase listeners
-  let purchaseUpdateSubscription: { remove: () => void } | null = null;
-  let purchaseErrorSubscription: { remove: () => void } | null = null;
+  // Purchase listeners as refs to persist between renders
+  const purchaseUpdateSubscriptionRef = useRef<{ remove: () => void } | null>(null);
+  const purchaseErrorSubscriptionRef = useRef<{ remove: () => void } | null>(null);
 
   // Initialize connection to store
   useEffect(() => {
@@ -99,8 +98,8 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
         setIsConnected(true);
         
         // Set up purchase listeners
-        purchaseUpdateSubscription = purchaseUpdatedListener(handlePurchaseUpdate);
-        purchaseErrorSubscription = purchaseErrorListener(handlePurchaseError);
+        purchaseUpdateSubscriptionRef.current = purchaseUpdatedListener(handlePurchaseUpdate);
+        purchaseErrorSubscriptionRef.current = purchaseErrorListener(handlePurchaseError);
         
         // Load cached subscription info
         loadCachedSubscriptionInfo();
@@ -119,11 +118,11 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
 
     // Clean up on unmount
     return () => {
-      if (purchaseUpdateSubscription) {
-        purchaseUpdateSubscription.remove();
+      if (purchaseUpdateSubscriptionRef.current) {
+        purchaseUpdateSubscriptionRef.current.remove();
       }
-      if (purchaseErrorSubscription) {
-        purchaseErrorSubscription.remove();
+      if (purchaseErrorSubscriptionRef.current) {
+        purchaseErrorSubscriptionRef.current.remove();
       }
       
       // End connection to store
@@ -356,7 +355,7 @@ export const SubscriptionProvider: React.FC<{ children: ReactNode }> = ({ childr
     return () => {
       clearTimeout(checkTimeout);
     };
-  }, [profile?.id, isConnected, tokenInitialized]);
+  }, [profile?.id, isConnected, tokenInitialized, checkSubscriptionStatus]);
 
   // Context value
   const value: SubscriptionContextType = {

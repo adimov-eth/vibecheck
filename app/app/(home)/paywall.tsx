@@ -15,7 +15,7 @@ import { useUsage } from '../../contexts/UsageContext';
 import { useUser } from '../../contexts/UserContext';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, typography, spacing, layout } from '../styles';
+import { colors } from '../styles';
 
 const PaywallScreen: React.FC = () => {
   const {
@@ -29,7 +29,7 @@ const PaywallScreen: React.FC = () => {
   } = useSubscription();
 
   const { usageStats, refreshUsage, isLoading: usageLoading } = useUsage();
-  const { profile, isLoading: profileLoading } = useUser();
+  const { isLoading: profileLoading } = useUser();
   
   // Combine loading states
   const isLoading = subscriptionLoading || usageLoading || profileLoading;

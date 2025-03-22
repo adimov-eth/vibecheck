@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 import * as Application from 'expo-application';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ApiError } from './api';
+import { AuthError } from '../types/auth';
 
 // API error class implementation
 export class ApiErrorImpl implements ApiError {
@@ -31,7 +32,6 @@ function isApiError(error: unknown): error is ApiError {
     'message' in error
   );
 }
-import { AuthError } from '../types/auth';
 
 // Constants
 const ERROR_LOG_KEY = 'error_logs';

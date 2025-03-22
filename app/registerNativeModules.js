@@ -4,12 +4,12 @@
  * It should be imported at the entry point of the application
  */
 
-// Enable native screens implementation for better performance
+// Import all modules first
 import { enableScreens } from 'react-native-screens';
-enableScreens();
-
-// Import gesture handler to ensure it's available
 import 'react-native-gesture-handler';
+
+// Then enable screens implementation for better performance
+enableScreens();
 
 export default {
   initialized: true
