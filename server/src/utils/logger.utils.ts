@@ -4,7 +4,7 @@ import winston from 'winston';
 // Get log level from environment or default to info
 const logLevel = process.env.LOG_LEVEL || 'info';
 
-const logger = winston.createLogger({
+export const logger = winston.createLogger({
   level: logLevel,
   format: winston.format.combine(
     winston.format.timestamp(),
