@@ -15,6 +15,7 @@ export function handleApiError(error: unknown, options: {
   onNetworkError?: () => void;
   onAuthError?: () => void;
   onServerError?: () => void;
+  onNotFoundError?: () => void;
   onOtherError?: () => void;
 } = {}) {
   const {
@@ -25,6 +26,7 @@ export function handleApiError(error: unknown, options: {
     onNetworkError,
     onAuthError,
     onServerError,
+    onNotFoundError,
     onOtherError
   } = options;
 
@@ -66,6 +68,12 @@ export function handleApiError(error: unknown, options: {
       title = 'Server Error';
       message = customMessages.server || 'Our servers are currently experiencing issues. Please try again later.';
       onServerError?.();
+    }
+    // Not found errors
+    else if (error.message.includes('not found') || error.status === 404) {
+      title = 'Not Found';
+      message = customMessages.notFound || 'The requested resource could not be found.';
+      onNotFoundError?.();
     }
     // Other API errors
     else {

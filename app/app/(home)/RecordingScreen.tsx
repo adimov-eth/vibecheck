@@ -11,9 +11,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRecording } from '../../contexts/RecordingContext';
 import { showToast } from '../../components/Toast';
 import * as Crypto from 'expo-crypto';
-import { useAudioRecording, AudioRecordingHook } from '../../hooks/useAudioRecording';
-import { useUpload, UploadHook } from '../../hooks/useUpload';
-import { useApi, ApiHook } from '../../hooks/useAPI';
+import { useAudioRecording } from '../../hooks/useAudioRecording';
+import { useUpload } from '../../hooks/useUpload';
+import { useApi } from '../../hooks/useAPI';
 import { useSubscriptionCheck } from '../../hooks/useSubscriptionCheck';
 import { router } from 'expo-router';
 import { useUsage } from '../../hooks/useUsage';
@@ -34,89 +34,110 @@ interface RecordingScreenProps {
   onRecordingComplete: (conversationId: string) => void;
 }
 
-export default function RecordingScreen({ selectedMode, onGoBack, onRecordingComplete }: RecordingScreenProps) {
+export default function RecordingScreen({ selectedMode, onGoBack, onRecordingComplete }: RecordingScreenProps): React.ReactElement {
   const [recordMode, setRecordMode] = useState<'separate' | 'live'>('separate');
-  const [currentPartner, setCurrentPartner] = useState(1);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [currentPartner, setCurrentPartner] = useState<number>(1);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [conversationId, setConversationIdState] = useState<string | null>(null);
   const [partner1Uri, setPartner1Uri] = useState<string | null>(null);
-  const [, setPartner2Uri] = useState<string | null>(null);
-  const [uploadsComplete, setUploadsComplete] = useState(false);
-  const [processingComplete, setProcessingComplete] = useState(false);
+  const [partner2Uri, setPartner2Uri] = useState<string | null>(null);
+  const [uploadsComplete, setUploadsComplete] = useState<boolean>(false);
+  const [processingComplete, setProcessingComplete] = useState<boolean>(false);
 
-  const { setConversationId, clearRecordings, setRecordingData } = useRecording();
-  const { isRecording, recordingStatus, startRecording, stopRecording, releaseRecordings, hasBeenReleased }: AudioRecordingHook = useAudioRecording();
-  const { uploadAudio, pollForStatus, isUploading }: UploadHook = useUpload();
-  const { createConversation }: ApiHook = useApi();
+  // Context and hooks
+  const { setConversationId, clearRecordings, setRecordingData, error, setError } = useRecording();
+  const { isRecording, recordingStatus, startRecording, stopRecording, releaseRecordings, hasBeenReleased } = useAudioRecording();
+  const { uploadAudio, pollForStatus, isUploading } = useUpload();
+  const { createConversation } = useApi();
   useSubscriptionCheck();
   const { checkCanCreateConversation, usageStats } = useUsage();
 
-  // Track whether the cleanup process has already been initiated
-  const cleanupInitiatedRef = useRef(false);
+  // Track cleanup state to prevent multiple release attempts
+  const cleanupInitiatedRef = useRef<boolean>(false);
 
+  // Show error toast when error state changes
   useEffect(() => {
-    // Only clear the recordings data, but keep the conversation ID for screen transitions
+    if (error) {
+      showToast.error('Error', error);
+    }
+  }, [error]);
+
+  // Clear recordings data when component mounts
+  useEffect(() => {
     clearRecordings();
-    
-    // Only clear the conversation ID when unmounting if we're not transitioning to results
     return () => {
-      // We'll handle conversation ID clearing explicitly in other places
+      // Empty cleanup to satisfy the dependency
     };
   }, [clearRecordings]);
 
-  const handleToggleRecording = async () => {
+  /**
+   * Handle starting/stopping recording based on current state
+   */
+  const handleToggleRecording = async (): Promise<void> => {
     if (isRecording) {
       const savedUri = await stopRecording(conversationId!, `partner${currentPartner}`);
       if (!savedUri) return;
+      
       setIsProcessing(true);
+      
       if (currentPartner === 1) {
         setPartner1Uri(savedUri);
         setRecordingData({ partner1: savedUri });
+        
         if (recordMode === 'separate') {
           setCurrentPartner(2);
         } else {
           // In live mode, upload the single recording immediately
           console.log(`Uploading single recording for live mode, uri: ${savedUri}`);
-          const success = await uploadAudio(conversationId!, savedUri);
+          
+          const { success } = await uploadAudio(conversationId!, savedUri);
+          
           if (success) {
             setUploadsComplete(true);
-            // For live mode, navigate to processing screen after successful upload
             setProcessingComplete(true);
             onRecordingComplete(conversationId!);
+          } else if (error) {
+            showToast.error('Upload Failed', error);
+            setIsProcessing(false);
+            return;
           }
         }
       } else if (partner1Uri) {
-        // Immediately navigate to the processing screen
+        // Second partner's recording completed
         setProcessingComplete(true);
-        // Schedule navigation soon after
         onRecordingComplete(conversationId!);
         
-        // Then continue with the processing in the background
+        // Continue with the processing in the background
         setPartner2Uri(savedUri);
-        // In separate mode with both recordings completed
         setRecordingData({ partner1: partner1Uri, partner2: savedUri });
+        
         console.log(`Uploading both recordings for separate mode, partner1: ${partner1Uri}, partner2: ${savedUri}`);
         
         // Upload one at a time to avoid potential race conditions
-        const success1 = await uploadAudio(conversationId!, partner1Uri);
-        const success2 = await uploadAudio(conversationId!, savedUri);
+        const { success: success1 } = await uploadAudio(conversationId!, partner1Uri);
+        const { success: success2 } = await uploadAudio(conversationId!, savedUri);
         
         if (success1 && success2) {
           console.log("All uploads complete");
           setUploadsComplete(true);
+        } else if (error) {
+          showToast.error('Upload Failed', error);
         }
       }
+      
       setIsProcessing(false);
     } else {
+      // Starting a new recording
       if (currentPartner === 1) {
         // Check usage limits before creating a new conversation
         const canCreate = await checkCanCreateConversation(true);
-        if (!canCreate) {
-          // User has reached limit and alert was shown
-          return;
-        }
+        if (!canCreate) return;
         
+        // Clear any previous errors and recordings
+        setError(null);
         clearRecordings();
+        
+        // Generate a new UUID for the conversation
         const newConversationId = Crypto.randomUUID();
         setConversationIdState(newConversationId);
         setConversationId(newConversationId);
@@ -124,7 +145,7 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
         // Start recording immediately
         await startRecording();
         
-        // Create conversation in the background
+        // Create conversation in the backend
         createConversation(newConversationId, selectedMode.id, recordMode)
           .then(serverConversationId => {
             if (serverConversationId !== newConversationId) {
@@ -132,113 +153,107 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
               setConversationId(serverConversationId);
             }
           })
-          .catch(error => {
-            console.error('Failed to create conversation:', error);
+          .catch(err => {
+            console.error('Failed to create conversation:', err);
+            setError('Failed to create conversation. Please try again.');
             showToast.error('Error', 'Failed to create conversation, but recording continues.');
-            // We don't stop recording here as we want the UX to be seamless
           });
       } else {
+        // Start recording for partner 2
         await startRecording();
       }
     }
   };
 
+  // Poll for conversation status after uploads complete
   useEffect(() => {
     if (uploadsComplete && conversationId) {
       console.log(`Starting to poll for status of conversation: ${conversationId}`);
+      
       const stopPolling = pollForStatus(conversationId, () => {
-        // When polling is complete, this callback is invoked
         console.log('Polling complete, processing complete');
         setProcessingComplete(true);
         
-        // Clean up recordings only after processing is complete
-        // Only initiate cleanup if not already done
+        // Release recordings after processing is complete if not already released
         if (!cleanupInitiatedRef.current && !hasBeenReleased) {
           cleanupInitiatedRef.current = true;
           
-          setTimeout(() => {
-            releaseRecordings()
-              .then(() => {
-                console.log('All recordings released after processing');
-                
-                // Navigate to results screen only after cleanup
-                console.log('Navigating to results screen');
-                onRecordingComplete(conversationId!);
-              })
-              .catch(err => {
-                console.error('Error releasing recordings:', err);
-                // Still continue to results even on cleanup error
-                console.log('Error during cleanup, still navigating to results');
-                onRecordingComplete(conversationId!);
-              });
-          }, 500); // Small delay before cleanup
-        } else if (cleanupInitiatedRef.current || hasBeenReleased) {
-          // If already cleaned up, just navigate
-          console.log('Cleanup already initiated or recordings released, navigating to results');
-          onRecordingComplete(conversationId!);
+          releaseRecordings()
+            .then(() => console.log('All recordings released after processing'))
+            .catch(err => console.error('Error releasing recordings:', err));
         }
       });
       
       // Return the stop polling function for cleanup
       return stopPolling;
     }
-  }, [uploadsComplete, conversationId, pollForStatus, onRecordingComplete, releaseRecordings, hasBeenReleased]);
+  }, [uploadsComplete, conversationId, pollForStatus, releaseRecordings, hasBeenReleased]);
   
   // Ensure all recordings are released when component unmounts
-  // but only if not already handled by the processing completion
   useEffect(() => {
     return () => {
-      // Only release if not already initiated by the completion handler
-      // and not already released
       if (!cleanupInitiatedRef.current && !hasBeenReleased) {
         console.log('Releasing recordings on component unmount');
-        releaseRecordings().catch(err => {
-          console.error('Error releasing recordings on unmount:', err);
-        });
+        releaseRecordings()
+          .catch(err => console.error('Error releasing recordings on unmount:', err));
       } else {
         console.log('Skipping release on unmount - already released or cleanup initiated');
       }
     };
   }, [releaseRecordings, hasBeenReleased]);
 
-  const handleToggleMode = (index: number) => {
+  /**
+   * Toggle between separate and live recording modes
+   */
+  const handleToggleMode = (index: number): void => {
     setRecordMode(index === 0 ? 'separate' : 'live');
   };
 
-  const renderRecordingStatus = () => {
+  /**
+   * Render a processing indicator with a message
+   */
+  const renderProcessingIndicator = (message: string): React.ReactElement => (
+    <View style={styles.processingContainer}>
+      <ActivityIndicator size="large" color={colors.primary} />
+      <Text style={styles.recordingStatus}>{message}</Text>
+    </View>
+  );
+
+  /**
+   * Render the current recording status UI
+   */
+  const renderRecordingStatus = (): React.ReactElement | null => {
+    if (error) {
+      return (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      );
+    }
+    
     if (processingComplete) {
-      return (
-        <View style={styles.processingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.recordingStatus}>Finalizing results...</Text>
-        </View>
-      );
+      return renderProcessingIndicator('Finalizing results...');
     }
+    
     if (isUploading) {
-      return (
-        <View style={styles.processingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.recordingStatus}>Uploading...</Text>
-        </View>
-      );
+      return renderProcessingIndicator('Uploading...');
     }
+    
     if (isProcessing) {
-      return (
-        <View style={styles.processingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.recordingStatus}>Processing...</Text>
-        </View>
-      );
+      return renderProcessingIndicator('Processing...');
     }
+    
     if (recordingStatus !== '') {
       return <Text style={styles.recordingStatus}>{recordingStatus}</Text>;
     }
+    
     return null;
   };
 
-  // Example function to handle a premium feature
-
-  const renderUsageIndicator = () => {
+  /**
+   * Render the usage indicator UI
+   */
+  const renderUsageIndicator = (): React.ReactElement | null => {
     if (!usageStats) return null;
     
     const isSubscribed = usageStats.isSubscribed;
@@ -265,6 +280,46 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
         )}
       </View>
     );
+  };
+
+  /**
+   * Reset state and retry after an error
+   */
+  const handleRetry = (): void => {
+    if (error) {
+      // Clear error state
+      setError(null);
+      
+      // Reset UI states
+      setIsProcessing(false);
+      setUploadsComplete(false);
+      setProcessingComplete(false);
+      
+      // If we have a conversation ID but no uploads, we can retry
+      if (conversationId && !uploadsComplete) {
+        if (partner1Uri && partner2Uri) {
+          // Both partners recorded, retry upload
+          uploadAudio(conversationId, [partner1Uri, partner2Uri])
+            .then(({ success }) => {
+              if (success) setUploadsComplete(true);
+            })
+            .catch(err => console.error('Retry upload failed:', err));
+        } else if (partner1Uri) {
+          // Just first partner recorded
+          if (recordMode === 'separate') {
+            // Ready for partner 2
+            setCurrentPartner(2);
+          } else {
+            // In live mode, retry upload
+            uploadAudio(conversationId, partner1Uri)
+              .then(({ success }) => {
+                if (success) setUploadsComplete(true);
+              })
+              .catch(err => console.error('Retry upload failed:', err));
+          }
+        }
+      }
+    }
   };
 
   return (
@@ -335,6 +390,15 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
                     : 'Tap to start recording'}
               </Text>
               {renderRecordingStatus()}
+              
+              {error && (
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={handleRetry}
+                >
+                  <Text style={styles.retryText}>Try Again</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <View style={styles.waveformContainer}>
               <AudioWaveform isActive={isRecording} />
@@ -346,7 +410,7 @@ export default function RecordingScreen({ selectedMode, onGoBack, onRecordingCom
   );
 }
 
-// Restore the styles
+// Styles
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   container: { flex: 1, backgroundColor: colors.background },
@@ -369,16 +433,29 @@ const styles = StyleSheet.create({
   waveformContainer: { width: '100%', height: height * 0.15, marginBottom: spacing.lg, alignItems: 'center', justifyContent: 'center' },
   recordingStatus: { marginTop: spacing.sm, ...typography.caption, color: colors.mediumText, textAlign: 'center' },
   processingContainer: { marginTop: spacing.md, alignItems: 'center', justifyContent: 'center' },
-  startOverButton: {
+  errorContainer: { 
+    marginTop: spacing.md, 
+    padding: spacing.sm,
+    borderRadius: layout.borderRadius.small,
+    backgroundColor: `${colors.error}20`,
+    maxWidth: '80%',
+  },
+  errorText: {
+    ...typography.body2,
+    color: colors.error,
+    textAlign: 'center',
+  },
+  retryButton: {
     backgroundColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: spacing.md,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: layout.borderRadius.small,
     marginTop: spacing.md,
   },
-  startOverText: {
-    fontSize: 16,
+  retryText: {
+    ...typography.body2,
+    color: colors.white,
     fontWeight: '600',
-    color: colors.background,
   },
   usageIndicator: {
     flexDirection: 'row',

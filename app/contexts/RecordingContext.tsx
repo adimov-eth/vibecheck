@@ -19,11 +19,13 @@ interface RecordingContextType {
   conversationId: string | null;
   processingProgress: number;
   audioStatus: Record<number, AudioStatus>;
+  error: string | null;
   setRecordingData: (data: RecordingData | null) => void;
   setAnalysisResult: (result: AnalysisResponse | null) => void;
   setConversationId: (id: string | null) => void;
   setProcessingProgress: (progress: number) => void;
   updateAudioStatus: (audioId: number, status: AudioStatus) => void;
+  setError: (error: string | null) => void;
   clearRecordings: () => void;
 }
 
@@ -38,6 +40,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
   const [conversationId, setConversationIdState] = useState<string | null>(null);
   const [processingProgress, setProcessingProgressState] = useState<number>(0);
   const [audioStatus, setAudioStatus] = useState<Record<number, AudioStatus>>({});
+  const [error, setErrorState] = useState<string | null>(null);
 
   // Initialize conversation ID from storage on mount
   useEffect(() => {
@@ -99,6 +102,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     setAnalysisResult(null);
     setProcessingProgressState(0);
     setAudioStatus({});
+    setErrorState(null);
     
     // Reset conversation ID last to ensure cleanup is complete first
     if (conversationId) {
@@ -124,6 +128,12 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Add a setter for error state
+  const setError = useCallback((error: string | null) => {
+    console.log(`RecordingContext: Setting error - ${error}`);
+    setErrorState(error);
+  }, []);
+
   // Add a cleanup effect that runs on app startup and unmount
   useEffect(() => {
     // On startup, cancel any stale polling operations
@@ -145,11 +155,13 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         conversationId,
         processingProgress,
         audioStatus,
+        error,
         setRecordingData: setRecordingDataCallback,
         setAnalysisResult: setAnalysisResultCallback,
         setConversationId,
         setProcessingProgress,
         updateAudioStatus,
+        setError,
         clearRecordings: clearRecordingData,
       }}
     >
