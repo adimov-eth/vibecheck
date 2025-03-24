@@ -16,6 +16,8 @@ import type {
   UsageStats
 } from "../types";
 
+import { logger } from "../../logger";
+
 const DEFAULT_CONFIG: ApiConfig = {
   baseUrl: "https://v.bkk.lol",
   version: "v1",
@@ -80,6 +82,19 @@ export class ApiClient {
     endpoint: string,
     options: ApiRequestOptions = {},
   ): Promise<T> {
+    const requestStartTime = Date.now();
+    const requestId = Math.random().toString(36).substring(7);
+
+    logger.info({
+      message: "API request started",
+      requestId,
+      method,
+      endpoint,
+      params: options.params,
+      skipAuth: options.skipAuth,
+      forceReload: options.forceReload
+    });
+
     const {
       skipAuth = false,
       forceReload = false,
@@ -89,11 +104,26 @@ export class ApiClient {
     const requestKey = this.getRequestKey(method, endpoint, options);
 
     if (!forceReload && this.pendingRequests.has(requestKey)) {
+      logger.info({
+        message: "Using existing pending request",
+        requestId,
+        requestKey
+      });
       return this.pendingRequests.get(requestKey) as Promise<T>;
     }
 
     if (!ignoreRateLimit) {
-      this.rateLimiter.checkRateLimit(endpoint);
+      try {
+        this.rateLimiter.checkRateLimit(endpoint);
+      } catch (error) {
+        logger.warn({
+          message: "Rate limit exceeded",
+          requestId,
+          endpoint,
+          error
+        });
+        throw error;
+      }
     }
 
     const isOnline = await networkService.isOnline();
@@ -101,25 +131,43 @@ export class ApiClient {
       if (method === "GET") {
         const cachedData = await this.cache.get<T>(endpoint, options.params);
         if (cachedData) {
+          logger.info({
+            message: "Returning cached data (offline)",
+            requestId,
+            endpoint,
+            params: options.params
+          });
           return cachedData;
         }
       }
 
+      logger.error({
+        message: "Network unavailable",
+        requestId,
+        method,
+        endpoint
+      });
       throw ApiError.network("No network connection available");
     }
 
     if (!skipAuth) {
       try {
         const clerkInstance = getClerkInstance()
-        // Use `getToken()` to get the current session token
         const token = await clerkInstance.session?.getToken()
         if (!token) {
+          logger.error({
+            message: "Auth token missing",
+            requestId
+          });
           throw ApiError.auth("No valid session token found");
         }
-
-        // Add token to options for network request
         options.token = token;
       } catch (error) {
+        logger.error({
+          message: "Auth error",
+          requestId,
+          error
+        });
         if (error instanceof ApiError && error.isAuthError) {
           throw error;
         }
@@ -130,18 +178,54 @@ export class ApiClient {
     const requestPromise = this.network
       .request<T>(method, endpoint, options)
       .then((response) => {
+        const requestDuration = Date.now() - requestStartTime;
+        logger.info({
+          message: "API request successful",
+          requestId,
+          duration: requestDuration,
+          method,
+          endpoint,
+          status: response.status
+        });
+
         if (method === "GET") {
           this.cache.set(endpoint, response.data, options.params);
+          logger.debug({
+            message: "Updated cache",
+            requestId,
+            endpoint
+          });
         }
         return response.data;
       })
       .catch((error) => {
+        const requestDuration = Date.now() - requestStartTime;
+        logger.error({
+          message: "API request failed",
+          requestId,
+          duration: requestDuration,
+          method,
+          endpoint,
+          error: {
+            name: error.name,
+            message: error.message,
+            status: error.status,
+            isRateLimitError: error instanceof ApiError && error.isRateLimitError
+          }
+        });
+
         if (error instanceof ApiError && error.isRateLimitError) {
           const retryAfter =
             error.status === 429
               ? parseInt(error.message.split(" ")[3])
               : undefined;
           this.rateLimiter.setRateLimit(endpoint, retryAfter);
+          logger.warn({
+            message: "Rate limit updated",
+            requestId,
+            endpoint,
+            retryAfter
+          });
         }
         throw error;
       });
@@ -152,6 +236,11 @@ export class ApiClient {
       return await requestPromise;
     } finally {
       this.pendingRequests.delete(requestKey);
+      logger.debug({
+        message: "Request cleanup complete",
+        requestId,
+        requestKey
+      });
     }
   }
 

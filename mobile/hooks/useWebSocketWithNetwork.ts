@@ -1,5 +1,5 @@
 import { networkService } from "@/services/NetworkService";
-import { webSocketService, type WebSocketMessage, type WebSocketMessageType } from "@/services/WebSocketService";
+import { WebSocketPayloads, webSocketService, type WebSocketMessage, type WebSocketMessageType } from "@/services/WebSocketService";
 import { handleError } from "@/utils/errorUtils";
 import { useAuth } from "@clerk/clerk-expo";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -83,7 +83,7 @@ export function useWebSocketWithNetwork(options: {
   
   // Send a message
   const send = useCallback(
-    (type: WebSocketMessageType, payload: Record<string, unknown>, topic?: string) => {
+    (type: WebSocketMessageType, payload: WebSocketPayloads[WebSocketMessageType], topic?: string) => {
       if (!isSignedIn) {
         console.warn("Cannot send WebSocket message when not signed in");
         return false;
