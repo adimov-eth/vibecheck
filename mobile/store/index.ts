@@ -1,73 +1,6 @@
-import { create } from "zustand";
-import { devtools, persist } from "zustand/middleware";
+import { useStore } from "./store";
 
-import { createAppSlice, type AppActions, type AppState } from "./appSlice";
-import { createAuthSlice, type AuthActions, type AuthState } from "./authSlice";
-import {
-  createRecordingSlice,
-  type RecordingActions,
-  type RecordingState,
-} from "./recordingSlice";
-import {
-  createSubscriptionSlice,
-  type SubscriptionActions,
-  type SubscriptionState,
-} from "./subscriptionSlice";
-import {
-  createUsageSlice,
-  type UsageActions,
-  type UsageState,
-} from "./usageSlice";
-
-/**
- * Combined application state interface
- */
-export interface StoreState
-  extends AuthState,
-    RecordingState,
-    SubscriptionState,
-    UsageState,
-    AppState {}
-
-/**
- * Combined application actions interface
- */
-export interface StoreActions
-  extends AuthActions,
-    RecordingActions,
-    SubscriptionActions,
-    UsageActions,
-    AppActions {}
-
-/**
- * Create the store with all slices
- */
-export const useStore = create<StoreState & StoreActions>()(
-  devtools(
-    persist(
-      (...a) => ({
-        ...createAuthSlice(...a),
-        ...createRecordingSlice(...a),
-        ...createSubscriptionSlice(...a),
-        ...createUsageSlice(...a),
-        ...createAppSlice(...a),
-      }),
-      {
-        name: "vibecheck-storage",
-        partialize: (state) => ({
-          // Only persist non-sensitive data
-          // Skip transient recording data, tokens, etc.
-          appTheme: state.appTheme,
-          hasCompletedOnboarding: state.hasCompletedOnboarding,
-          lastUsageCheck: state.lastUsageCheck,
-        }),
-      },
-    ),
-  ),
-);
-
-// Store the store instance globally with proper typing
-global.store = useStore;
+export type { StoreActions, StoreState } from "./store";
 
 /**
  * Export typed selectors for use in components
@@ -126,3 +59,5 @@ export const useAppState = () =>
     completeOnboarding: state.completeOnboarding,
     initializeApp: state.initializeApp,
   }));
+
+export { useStore };

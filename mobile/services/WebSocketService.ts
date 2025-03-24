@@ -1,8 +1,8 @@
-import { useAuth } from "@clerk/clerk-expo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, Platform } from "react-native";
 
-import { useStore } from "../store";
+import type { AudioStatusUpdate } from "@/types/recording";
+import { getClerkInstance } from "@clerk/clerk-expo";
 import { errorService } from "./ErrorService";
 import { eventBus } from "./EventBus";
 import { networkService } from "./NetworkService";
@@ -66,17 +66,23 @@ function isWebSocketMessage(message: unknown): message is WebSocketMessage {
 }
 
 /**
- * Get auth token from Clerk
+ * Get auth token from global store
  */
 async function getAuthToken(): Promise<string | null> {
-  try {
-    const { getToken } = useAuth();
-    const token = await getToken();
-    return token;
-  } catch (error) {
-    console.error("Error getting Clerk auth token:", error);
-    return null;
-  }
+  const clerkInstance = getClerkInstance()
+  // Use `getToken()` to get the current session token
+  const token = await clerkInstance.session?.getToken() ?? null;
+  return token;
+}
+
+interface ConversationData {
+  status: string;
+  processingProgress: number;
+  error?: string;
+}
+
+interface AudioData {
+  status: string;
 }
 
 /**
@@ -569,66 +575,42 @@ export class WebSocketService {
   };
 
   /**
-   * Update conversation progress in React Query cache
+   * Update conversation progress
    */
   private updateConversationProgress(message: WebSocketMessage): void {
-    if (!message.topic) return;
-
-    // Extract conversation ID from topic
-    const conversationId = message.topic.split(":")[1];
-    if (!conversationId) return;
-
-    // Get progress from message
-    const progress = message.payload.progress;
-    if (typeof progress !== "number") return;
-
-    // Update Progress in store
-    useStore.getState().setProcessingProgress(Math.round(progress * 100));
-
-    // Update React Query cache with new progress
-    queryClient.setQueryData(
-      ["conversation", conversationId, "status"],
-      (oldData: { status?: string; progress?: number; error?: string } | undefined) => {
-        if (!oldData) {
-          return {
+    const progress = message.payload.progress as number;
+    if (typeof progress === "number") {
+      const roundedProgress = Math.round(progress * 100);
+      eventBus.emit("recording:progress", roundedProgress);
+      
+      if (message.topic) {
+        const conversationId = message.topic.split(":")[1];
+        if (conversationId) {
+          queryClient.setQueryData<ConversationData>(["conversation", conversationId], {
             status: "processing",
-            progress,
-          };
+            processingProgress: roundedProgress,
+          });
         }
-        return {
-          ...oldData,
-          status: "processing",
-          progress,
-        };
-      },
-    );
+      }
+    }
   }
 
   /**
    * Handle conversation completed message
    */
   private handleConversationCompleted(message: WebSocketMessage): void {
-    if (!message.topic) return;
-
-    // Extract conversation ID from topic
-    const conversationId = message.topic.split(":")[1];
-    if (!conversationId) return;
-
-    console.log(`Conversation ${conversationId} completed`);
-
-    // Update React Query cache
-    queryClient.setQueryData(["conversation", conversationId, "status"], {
-      status: "completed",
-      progress: 1.0,
-    });
-
-    // Invalidate the results query to trigger a fetch
-    queryClient.invalidateQueries({
-      queryKey: ["conversation", conversationId, "result"],
-    });
-
-    // Set final progress in store
-    useStore.getState().setProcessingProgress(100);
+    eventBus.emit("recording:progress", 100);
+    eventBus.emit("recording:complete", {});
+    
+    if (message.topic) {
+      const conversationId = message.topic.split(":")[1];
+      if (conversationId) {
+        queryClient.setQueryData<ConversationData>(["conversation", conversationId], {
+          status: "completed",
+          processingProgress: 100,
+        });
+      }
+    }
   }
 
   /**
@@ -636,14 +618,12 @@ export class WebSocketService {
    */
   private handleConversationError(message: WebSocketMessage): void {
     if (!message.topic) return;
-
-    // Extract conversation ID from topic
     const conversationId = message.topic.split(":")[1];
     if (!conversationId) return;
-
+    
     const errorMessage = message.payload.error as string || "Unknown error";
-
-    // Use centralized error service
+    eventBus.emit("recording:error", errorMessage);
+    
     errorService.handleRecordingError(errorMessage, {
       conversationId,
       updateStore: true,
@@ -655,22 +635,11 @@ export class WebSocketService {
    * Handle audio processed message
    */
   private handleAudioProcessed(message: WebSocketMessage): void {
-    const audioIdString = message.payload.audioId as string;
-    if (!audioIdString) return;
-
-    console.log(`Audio ${audioIdString} processed successfully`);
-
-    // Parse audioId as number since that's what the store expects
-    const audioId = parseInt(audioIdString, 10);
-    if (isNaN(audioId)) {
-      console.error(`Invalid audio ID: ${audioIdString}`);
-      return;
-    }
-
-    // Update audio status in store
-    useStore.getState().updateAudioStatus(audioId, {
-      status: "transcribed",
-    });
+    const audioId = message.payload.audioId as number;
+    if (typeof audioId !== "number") return;
+    
+    eventBus.emit("audio:status", { audioId, status: "ready" } as AudioStatusUpdate);
+    queryClient.setQueryData<AudioData>(["audio", audioId], { status: "ready" });
   }
 
   /**
@@ -679,23 +648,16 @@ export class WebSocketService {
   private handleAudioFailed(message: WebSocketMessage): void {
     const audioIdString = message.payload.audioId as string;
     if (!audioIdString) return;
-
+    
     const errorMessage = message.payload.error as string || "Unknown error";
-    console.error(`Audio ${audioIdString} processing failed:`, errorMessage);
-
-    // Parse audioId as number since that's what the store expects
     const audioId = parseInt(audioIdString, 10);
     if (isNaN(audioId)) {
       console.error(`Invalid audio ID: ${audioIdString}`);
-      // Still set the error in store even if we can't update the specific audio status
       eventBus.emit("recording:error", `Audio processing failed: ${errorMessage}`);
       return;
     }
-
-    // Update audio status via EventBus
-    eventBus.emit("audio:status", { audioId, status: "failed", error: errorMessage });
-
-    // Set error in store if this is a critical failure
+    
+    eventBus.emit("audio:status", { audioId, status: "failed", error: errorMessage } as AudioStatusUpdate);
     eventBus.emit("recording:error", `Audio processing failed: ${errorMessage}`);
   }
 
@@ -875,12 +837,12 @@ export class WebSocketService {
    */
   private notifyListeners(): void {
     const state = {
-      connected:
-        this.connectionState === "connected" ||
-        this.connectionState === "authenticated",
+      connected: this.connectionState === "connected" || this.connectionState === "authenticated",
       authenticated: this.connectionState === "authenticated",
     };
-
+    
+    eventBus.emit("websocket:connection_state", state);
+    
     this.listeners.forEach((listener) => {
       try {
         listener(state);

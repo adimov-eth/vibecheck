@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   recordingService,
-  type RecordingMode,
-  type RecordingStatus
 } from "@/services/RecordingService";
+
+import type { RecordingMode, RecordingStatus } from "@/types/recording";
 
 /**
  * Hook for using the RecordingService
@@ -13,7 +13,7 @@ import {
 export function useRecordingService() {
   // State tracking
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>(
-    () => recordingService.getStatus().recordingStatus
+    () => recordingService.getStatus().status
   );
   const [recordingDuration, setRecordingDuration] = useState<number>(0);
   const [processingProgress, setProcessingProgress] = useState<number>(0);
@@ -51,10 +51,10 @@ export function useRecordingService() {
     // Status timer for sync
     const statusTimer = setInterval(() => {
       const status = recordingService.getStatus();
-      setRecordingDuration(status.recordingDuration);
+      setRecordingDuration(status.recordingDuration ?? 0);
       setConversationId(status.conversationId);
       setCurrentPartner(status.currentPartner);
-      setIsReleased(status.isReleased);
+      setIsReleased(status.isReleased ?? false);
     }, 500);
     
     return () => {
