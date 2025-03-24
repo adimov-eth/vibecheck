@@ -3,10 +3,11 @@ import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { Slot, Stack } from "expo-router";
+import { Stack } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
+import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { useReactQueryDevTools } from '@dev-plugins/react-query';
@@ -115,11 +116,31 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
 };
 
 /**
+ * Navigation layout component that handles the Stack navigation structure
+ */
+const NavigationLayout = () => {
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: "#FFFFFF" },
+      }}
+    >
+      <Stack.Screen name="(main)" options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+      <Stack.Screen name="verify-email" options={{ headerShown: false }} />
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+    </Stack>
+  );
+};
+
+/**
  * Root layout component that sets up the app's providers and global context
  */
 export default function RootLayout() {
   const persister = createQueryPersister();
   useReactQueryDevTools(queryClient);
+
   return (
     <ClerkProvider
       publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
@@ -136,20 +157,14 @@ export default function RootLayout() {
           console.log("React Query cache restored from persistence");
         }}
       >
-        {/* {__DEV__ && <ReactQueryDevtools initialIsOpen={false} />} */}
         <SafeAreaProvider>
           <StatusBar style="auto" />
           <AppInitializer>
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: "#FFFFFF" },
-              }}
-            >
-              <Slot />
-            </Stack>
+            <View style={{ flex: 1 }}>
+              <NavigationLayout />
+              <ToastProvider />
+            </View>
           </AppInitializer>
-          <ToastProvider />
         </SafeAreaProvider>
       </PersistQueryClientProvider>
     </ClerkProvider>
