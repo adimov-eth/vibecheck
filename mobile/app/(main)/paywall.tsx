@@ -3,10 +3,8 @@ import { Container } from '@/components/layout/Container';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { colors, spacing, typography } from '@/constants/styles';
-import {
-  useSubscriptionStore,
-  useUsageStore
-} from '@/hooks/useTypedStore';
+import { useUsage } from '@/hooks/useApi';
+import { useSubscription } from '@/hooks/useSubscription';
 import { SUBSCRIPTION_SKUS } from '@/types/subscription';
 import { Ionicons } from '@expo/vector-icons';
 import type { Ionicons as IoniconsType } from '@expo/vector-icons/build/Icons';
@@ -29,18 +27,21 @@ export default function Paywall() {
   const [isRestoring, setIsRestoring] = useState(false);
   const [purchaseSuccess, setPurchaseSuccess] = useState(false);
 
-  // Access subscription and usage state from the store
+  // Use React Query hooks for data fetching
   const { 
-    isSubscribed, 
-    subscriptionProducts, 
-    purchaseSubscription, 
-    restorePurchases
-  } = useSubscriptionStore();
-  
+    isSubscribed,
+    subscriptionProducts,
+    purchase,
+    restore,
+    isLoading: subscriptionLoading,
+    error: subscriptionError,
+  } = useSubscription();
+
   const { 
-    remainingConversations, 
-    usageLimit 
-  } = useUsageStore();
+    usageData,
+    isLoading: usageLoading,
+    error: usageError,
+  } = useUsage();
 
   // Select yearly plan by default when products load
   useEffect(() => {
@@ -72,7 +73,7 @@ export default function Paywall() {
       const offerToken = product?.subscriptionOfferDetails?.[0]?.offerToken;
       
       // Attempt purchase
-      await purchaseSubscription(selectedPlan, offerToken);
+      await purchase(selectedPlan, offerToken);
     } catch (err) {
       console.error('Purchase error:', err);
       setIsPurchasing(false);
@@ -82,7 +83,7 @@ export default function Paywall() {
   const handleRestore = async () => {
     setIsRestoring(true);
     try {
-      await restorePurchases();
+      await restore();
     } catch (err) {
       console.error('Restore error:', err);
     } finally {
@@ -117,6 +118,51 @@ export default function Paywall() {
             title="Continue to App"
             variant="primary"
             onPress={() => router.replace('/home')}
+          />
+        </View>
+      </Container>
+    );
+  }
+
+  // Loading state
+  if (subscriptionLoading || usageLoading) {
+    return (
+      <Container withSafeArea>
+        <AppBar 
+          title="Premium Subscription" 
+          showBackButton
+          onBackPress={handleGoBack}
+        />
+        <View style={localStyles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={localStyles.loadingText}>Loading subscription details...</Text>
+        </View>
+      </Container>
+    );
+  }
+
+  // Error state
+  if (subscriptionError || usageError) {
+    const errorMessage = subscriptionError instanceof Error 
+      ? subscriptionError.message 
+      : usageError instanceof Error 
+        ? usageError.message 
+        : 'Failed to load subscription details';
+
+    return (
+      <Container withSafeArea>
+        <AppBar 
+          title="Premium Subscription" 
+          showBackButton
+          onBackPress={handleGoBack}
+        />
+        <View style={localStyles.errorContainer}>
+          <Ionicons name="alert-circle" size={48} color={colors.error} />
+          <Text style={localStyles.errorText}>{errorMessage}</Text>
+          <Button
+            title="Try Again"
+            variant="primary"
+            onPress={() => router.replace('/paywall')}
           />
         </View>
       </Container>
@@ -161,7 +207,7 @@ export default function Paywall() {
             <View style={localStyles.usageStat}>
               <Text style={localStyles.usageStatLabel}>Current Usage</Text>
               <Text style={localStyles.usageStatValue}>
-                {usageLimit - remainingConversations}/{usageLimit}
+                {usageData ? `${usageData.limit - usageData.remainingConversations}/${usageData.limit}` : '0/0'}
               </Text>
             </View>
             
@@ -169,9 +215,9 @@ export default function Paywall() {
               <Text style={localStyles.usageStatLabel}>Remaining</Text>
               <Text style={[
                 localStyles.usageStatValue,
-                remainingConversations === 0 && localStyles.usageStatValueZero
+                (!usageData?.remainingConversations) && localStyles.usageStatValueZero
               ]}>
-                {remainingConversations}
+                {usageData?.remainingConversations || 0}
               </Text>
             </View>
           </View>
@@ -457,5 +503,28 @@ const localStyles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  loadingText: {
+    ...typography.body1,
+    color: colors.mediumText,
+    marginTop: spacing.md,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  errorText: {
+    ...typography.body1,
+    color: colors.error,
+    textAlign: 'center',
+    marginVertical: spacing.lg,
   },
 });

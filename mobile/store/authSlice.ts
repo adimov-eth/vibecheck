@@ -40,10 +40,7 @@ export const createAuthSlice: StateCreator<
     });
   },
 
-  setLoggedIn: (isLoggedIn: boolean, token?: string) => {
-    updateAuthState(set, {
-      isAuthenticated: isLoggedIn,
-      token: isLoggedIn ? token || null : null,
-    });
-  },
+  setLoggedIn: (isAuthenticated: boolean, token?: string) => {
+    set({ isAuthenticated, token });
+  }
 });

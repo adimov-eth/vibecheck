@@ -2,7 +2,7 @@ import { handleError } from "@/utils/errorUtils";
 import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
-import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { PersistQueryClientProvider, type Persister } from "@tanstack/react-query-persist-client";
 import { Stack } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
@@ -10,8 +10,8 @@ import React, { useEffect } from "react";
 import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { useReactQueryDevTools } from '@dev-plugins/react-query';
-
+import { useUsage } from "@/hooks/useApi";
+import { useSubscriptionStatus } from "@/hooks/useSubscription";
 import "@/store/listeners";
 import { ToastProvider } from "../components/ui/Toast";
 import { networkService } from "../services/NetworkService";
@@ -19,8 +19,8 @@ import { queryClient, setupNetworkListeners } from "../services/QueryClient";
 import { useStore } from "../store";
 
 // React Query persistence configuration
-const createQueryPersister = () =>
-  createAsyncStoragePersister({
+const createQueryPersister = (): Persister => {
+  return createAsyncStoragePersister({
     storage: AsyncStorage,
     key: "vibecheck-query-cache",
     serialize: (data) => {
@@ -39,6 +39,7 @@ const createQueryPersister = () =>
       return JSON.stringify(filteredData);
     },
   });
+};
 
 const tokenCache = {
   async getToken(key: string) {
@@ -69,6 +70,8 @@ interface AppInitializerProps {
 const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
   const { isSignedIn, getToken } = useAuth();
   const { initializeApp, setLoggedIn } = useStore();
+  const { refetch: refetchUsage } = useUsage({ enabled: false });
+  const { refetch: refetchSubscriptionStatus } = useSubscriptionStatus({ enabled: false });
 
   useEffect(() => {
     let isMounted = true;
@@ -80,20 +83,22 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
         // Initialize app state
         await initializeApp();
 
-        // Initialize network monitoring
+        // Set up network monitoring
         networkService.init();
-
-        // Set up React Query network listeners
         setupNetworkListeners();
 
-        // Set authentication state based on Clerk's auth state
-        if (isMounted) {
-          if (isSignedIn) {
-            const token = await getToken();
-            setLoggedIn(true, token || undefined);
-          } else {
-            setLoggedIn(false);
-          }
+        // Handle authentication and data fetching
+        if (isSignedIn) {
+          const token = await getToken();
+          setLoggedIn(true, token || undefined);
+
+          // Wait a tick to ensure store updates propagate
+          await new Promise(resolve => setTimeout(resolve, 0));
+
+          // Fetch usage and subscription data
+          await Promise.all([refetchUsage(), refetchSubscriptionStatus()]);
+        } else {
+          setLoggedIn(false);
         }
       } catch (error) {
         if (isMounted) {
@@ -105,14 +110,12 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
 
     initializeServices();
 
-    // Cleanup on unmount
     return () => {
       isMounted = false;
-      networkService.cleanup();
     };
-  }, [isSignedIn]); // Only depend on isSignedIn state
+  }, [isSignedIn, getToken, initializeApp, setLoggedIn, refetchUsage, refetchSubscriptionStatus]);
 
-  return <>{children}</>;
+  return children;
 };
 
 /**
@@ -139,7 +142,6 @@ const NavigationLayout = () => {
  */
 export default function RootLayout() {
   const persister = createQueryPersister();
-  useReactQueryDevTools(queryClient);
 
   return (
     <ClerkProvider
@@ -151,10 +153,7 @@ export default function RootLayout() {
         persistOptions={{
           persister,
           maxAge: 1000 * 60 * 60 * 24, // 24 hours
-          buster: "1.0.0", // Update when app version changes
-        }}
-        onSuccess={() => {
-          console.log("React Query cache restored from persistence");
+          buster: "1.0.0",
         }}
       >
         <SafeAreaProvider>

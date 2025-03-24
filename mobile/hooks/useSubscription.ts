@@ -5,32 +5,15 @@ import { useCallback, useEffect } from 'react';
 import { useSubscriptionStore } from './useTypedStore';
 
 const DEFAULT_STALE_TIME = 1000 * 60 * 5; // 5 minutes
-const DEFAULT_GCTIME = 1000 * 60 * 60; // 1 hour
+// const DEFAULT_GCTIME = 1000 * 60 * 60; // 1 hour
 
-export const useSubscriptionStatus = (options?: UseQueryOptions<SubscriptionStatus, Error>) => {
-  const { setSubscriptionStatus } = useSubscriptionStore();
-  
-  // Query for subscription status from the server
+export const useSubscriptionStatus = (options?: Omit<UseQueryOptions<SubscriptionStatus, Error>, 'queryKey' | 'queryFn'>) => {
   const query = useQuery<SubscriptionStatus, Error>({
     queryKey: ['subscriptionStatus'],
     queryFn: () => subscriptionApi.getSubscriptionStatus(),
     staleTime: DEFAULT_STALE_TIME,
-    gcTime: DEFAULT_GCTIME,
-    retry: 3,
     ...options,
   });
-
-  // Update local store when server status changes
-  useEffect(() => {
-    if (query.data) {
-      setSubscriptionStatus(
-        query.data.isSubscribed,
-        query.data.subscription.type,
-        query.data.subscription.expiresDate,
-      );
-    }
-  }, [query.data, setSubscriptionStatus]);
-
   return query;
 };
 

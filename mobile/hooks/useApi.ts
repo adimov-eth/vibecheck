@@ -9,11 +9,9 @@ import { useCallback } from "react";
 import {
   apiClient,
   type AnalysisResponse,
-  type SubscriptionStatus,
-  type UsageStats,
+  type UsageStats
 } from "@/services/api";
-import { webSocketService } from "@/services/WebSocketService";
-import type { SubscriptionType } from "@/types/subscription";
+import { webSocketService, type WebSocketMessageType, type WebSocketPayloads } from "@/services/WebSocketService";
 import { handleError } from "@/utils/errorUtils";
 import { storeApi, useRecordingStore } from "./useTypedStore";
 
@@ -111,12 +109,10 @@ export const useConversations = () => {
 
       // Notify WebSocket about audio upload completion
       webSocketService.send({
-        type: "audio_uploaded",
+        type: "audio_uploaded" as WebSocketMessageType,
         payload: {
-          audioId: result.audioId as never,
-          conversationId: variables.conversationId as never,
-          timestamp: new Date().toISOString() as never,
-        },
+          audioId: result.audioId,
+        } satisfies WebSocketPayloads["audio_uploaded"],
         topic: `conversation:${variables.conversationId}`,
       });
     },
@@ -129,12 +125,11 @@ export const useConversations = () => {
       
       // Ensure we notify about the failure
       webSocketService.send({
-        type: "audio_failed",
+        type: "audio_failed" as WebSocketMessageType,
         payload: {
-          conversationId: variables.conversationId as never,
+          audioId: variables.conversationId,
           error: error instanceof Error ? error.message : "Unknown upload error",
-          timestamp: new Date().toISOString() as never,
-        },
+        } satisfies WebSocketPayloads["audio_failed"],
         topic: `conversation:${variables.conversationId}`,
       });
     }
@@ -291,105 +286,14 @@ export const useConversations = () => {
 /**
  * Custom hook for using usage-related API endpoints
  */
-export const useUsage = (options?: UseQueryOptions<UsageStats, Error>) => {
+export const useUsage = (options?: Omit<UseQueryOptions<UsageStats, Error>, 'queryKey' | 'queryFn'>) => {
   const { data, isLoading, error, refetch } = useQuery<UsageStats, Error>({
     queryKey: ["usage"],
     queryFn: () => apiClient.getUserUsageStats(),
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 5 * 60 * 1000,
     ...options,
   });
-
-  /**
-   * Check if user can create a new conversation
-   * @param showAlert Show alert if limit reached
-   * @returns Whether user can create a conversation
-   */
-  const checkCanCreateConversation = useCallback(
-    async (showAlert = false): Promise<boolean> => {
-      try {
-        // Force refresh usage data
-        const usageData = await refetch();
-
-        // If subscribed, always allow
-        if (usageData.data?.isSubscribed) {
-          return true;
-        }
-
-        // Check remaining conversations
-        const canCreate = (usageData.data?.remainingConversations || 0) > 0;
-
-        if (!canCreate && showAlert) {
-          // In real implementation, you would navigate to paywall
-          console.log("No conversations remaining, showing paywall");
-
-          // Set error in global state using the storeApi
-          storeApi.recording.setRecordingError("You have reached your free usage limit");
-        }
-
-        return canCreate;
-      } catch (error) {
-        console.error("Error checking if can create conversation:", error);
-        return false;
-      }
-    },
-    [refetch],
-  );
-
-  return {
-    usageData: data,
-    isLoading,
-    error,
-    refetch,
-    checkCanCreateConversation,
-  };
+  return { usageData: data, isLoading, error, refetch };
 };
 
 
-/**
- * Custom hook for using subscription-related API endpoints
- */
-export const useSubscription = () => {
-  const queryClient = useQueryClient();
-
-  /**
-   * Get subscription status
-   */
-  const { data, isLoading, error, refetch } = useQuery<
-    SubscriptionStatus,
-    Error
-  >({
-    queryKey: ["subscription"],
-    queryFn: () => apiClient.getSubscriptionStatus(),
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
-
-  /**
-   * Verify a purchase receipt
-   */
-  const verifyReceipt = useMutation({
-    mutationFn: (receiptData: string) =>
-      apiClient.verifySubscriptionReceipt(receiptData),
-    onSuccess: () => {
-      // Invalidate subscription and usage queries
-      queryClient.invalidateQueries({ queryKey: ["subscription"] });
-      queryClient.invalidateQueries({ queryKey: ["usage"] });
-
-      // Update global state using the storeApi
-      if (data) {
-        storeApi.subscription.setSubscriptionStatus(
-          data.isSubscribed,
-          data.subscription?.type as SubscriptionType,
-          data.subscription?.expiresDate,
-        );
-      }
-    },
-  });
-
-  return {
-    subscriptionData: data,
-    isLoading,
-    error,
-    refetch,
-    verifyReceipt,
-  };
-};

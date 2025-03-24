@@ -2,9 +2,9 @@ import { iapService } from "@/services/iap";
 import { subscriptionEvents } from "@/services/subscriptionEvents";
 import { type SubscriptionType } from "@/types/subscription";
 import {
-    type Subscription,
-    type SubscriptionAndroid,
-    type SubscriptionIOS
+  type Subscription,
+  type SubscriptionAndroid,
+  type SubscriptionIOS
 } from "react-native-iap";
 import { type StateCreator } from "zustand";
 
@@ -99,8 +99,17 @@ export const createSubscriptionSlice: StateCreator<
   [],
   SubscriptionState & SubscriptionActions
 > = (set) => {
-  // Set up subscription event listener
+  // Track last update to prevent duplicate updates
+  let lastUpdate: string | null = null;
+
+  // Set up subscription event listener with debouncing
   subscriptionEvents.onSubscriptionUpdated((status) => {
+    const currentUpdate = JSON.stringify(status);
+    if (lastUpdate === currentUpdate) {
+      return; // Skip duplicate updates
+    }
+    lastUpdate = currentUpdate;
+
     updateSubscriptionState(set, {
       isSubscribed: status.isSubscribed,
       subscriptionPlan: status.subscriptionType,
@@ -158,6 +167,12 @@ export const createSubscriptionSlice: StateCreator<
       plan: SubscriptionType | null,
       expiryDate: Date | null,
     ) => {
+      const currentUpdate = JSON.stringify({ isSubscribed, plan, expiryDate });
+      if (lastUpdate === currentUpdate) {
+        return; // Skip duplicate updates
+      }
+      lastUpdate = currentUpdate;
+
       updateSubscriptionState(set, {
         isSubscribed,
         subscriptionPlan: plan,

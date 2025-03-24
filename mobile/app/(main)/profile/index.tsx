@@ -17,9 +17,8 @@ export default function Profile() {
 
   const handleBackPress = () => router.back();
   const handleSignOut = async () => await signOut();
-  const navigateToUpdatePassword = () => router.push('/update-password');
+  const navigateToUpdatePassword = () => router.push('/profile/update-password');
   const navigateToPaywall = () => router.push('/paywall');
-  const handleManageSubscription = () => router.push('/subscription');
 
   const getFormattedResetDate = () => {
     if (!resetDate) return 'Unknown';
@@ -88,13 +87,15 @@ export default function Profile() {
                 </View>
               )}
             </View>
-            <Button
-              title={isSubscribed ? 'Manage Subscription' : 'Upgrade to Premium'}
-              onPress={isSubscribed ? handleManageSubscription : navigateToPaywall}
-              variant={isSubscribed ? 'outline' : 'primary'}
-              leftIcon={isSubscribed ? 'settings-outline' : 'star-outline'}
-              style={styles.button}
-            />
+            {!isSubscribed && (
+              <Button
+                title="Upgrade to Premium"
+                onPress={navigateToPaywall}
+                variant="outline"
+                leftIcon="star-outline"
+                style={styles.button}
+              />
+            )}
           </View>
         </View>
 
