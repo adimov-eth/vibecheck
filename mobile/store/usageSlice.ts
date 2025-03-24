@@ -1,3 +1,4 @@
+import { apiClient } from "@/services/api";
 import { type StateCreator } from "zustand";
 
 // Types
@@ -39,14 +40,14 @@ const updateUsageData = (
     currentUsage: number;
     limit: number;
     remainingConversations: number;
-    resetDate: string;
+    resetDate?: string;
   },
 ) => {
   updateUsageState(set, {
     currentUsage: usageData.currentUsage,
     usageLimit: usageData.limit,
     remainingConversations: usageData.remainingConversations,
-    resetDate: usageData.resetDate,
+    resetDate: usageData.resetDate || null,
     lastUsageCheck: Date.now(),
     isLoading: false,
     error: null,
@@ -55,17 +56,14 @@ const updateUsageData = (
 
 // API calls (to be moved to a separate service)
 const fetchUsageData = async () => {
-  // Simulate API response delay
-  await new Promise((resolve) => setTimeout(resolve, 300));
-
-  // Simulated API response
+  const usage = await apiClient.getUserUsageStats();
   return {
-    currentUsage: 3,
-    limit: 10,
-    remainingConversations: 7,
-    resetDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    currentUsage: usage.currentUsage,
+    limit: usage.limit,
+    remainingConversations: usage.remainingConversations,
+    resetDate: usage.resetDate,
   };
-};
+}
 
 export const createUsageSlice: StateCreator<
   UsageState & UsageActions,
