@@ -121,6 +121,7 @@ export default function Recording() {
         <View style={styles.modeCardContainer}>
           <ModeCard
             id={mode.id}
+            mode={mode.id}
             title={mode.title}
             description={mode.description}
             color={mode.color}
