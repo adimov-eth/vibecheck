@@ -90,7 +90,7 @@ export default function Profile() {
             </View>
             <Button
               title={isSubscribed ? 'Manage Subscription' : 'Upgrade to Premium'}
-              onPress={handleManageSubscription}
+              onPress={isSubscribed ? handleManageSubscription : navigateToPaywall}
               variant={isSubscribed ? 'outline' : 'primary'}
               leftIcon={isSubscribed ? 'settings-outline' : 'star-outline'}
               style={styles.button}

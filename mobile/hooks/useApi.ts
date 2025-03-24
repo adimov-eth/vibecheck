@@ -113,9 +113,9 @@ export const useConversations = () => {
       webSocketService.send({
         type: "audio_uploaded",
         payload: {
-          audioId: result.audioId,
-          conversationId: variables.conversationId,
-          timestamp: new Date().toISOString(),
+          audioId: result.audioId as never,
+          conversationId: variables.conversationId as never,
+          timestamp: new Date().toISOString() as never,
         },
         topic: `conversation:${variables.conversationId}`,
       });
@@ -131,9 +131,9 @@ export const useConversations = () => {
       webSocketService.send({
         type: "audio_failed",
         payload: {
-          conversationId: variables.conversationId,
+          conversationId: variables.conversationId as never,
           error: error instanceof Error ? error.message : "Unknown upload error",
-          timestamp: new Date().toISOString(),
+          timestamp: new Date().toISOString() as never,
         },
         topic: `conversation:${variables.conversationId}`,
       });

@@ -1,6 +1,14 @@
+import { iapService } from "@/services/iap";
+import { subscriptionEvents } from "@/services/subscriptionEvents";
+import { type SubscriptionType } from "@/types/subscription";
+import {
+    type Subscription,
+    type SubscriptionAndroid,
+    type SubscriptionIOS
+} from "react-native-iap";
 import { type StateCreator } from "zustand";
 
-export type SubscriptionPlan = "monthly" | "yearly" | null;
+export type SubscriptionPlan = SubscriptionType | null;
 
 export interface SubscriptionProduct {
   productId: string;
@@ -32,7 +40,7 @@ export interface SubscriptionActions {
   restorePurchases: () => Promise<boolean>;
   setSubscriptionStatus: (
     isSubscribed: boolean,
-    plan: SubscriptionPlan,
+    plan: SubscriptionType | null,
     expiryDate: Date | null,
   ) => void;
   fetchSubscriptionProducts: () => Promise<void>;
@@ -53,42 +61,36 @@ const updateSubscriptionState = (
   }
 };
 
-const mockPurchaseSubscription = async (
-  productId: string,
-  offerToken?: string,
-) => {
-  console.log(
-    `Purchasing subscription: ${productId} with offer token: ${offerToken || "none"}`,
-  );
-  // Simulate a successful purchase
-  return {
-    isSubscribed: true,
-    plan: productId.includes("yearly")
-      ? "yearly"
-      : ("monthly" as SubscriptionPlan),
-    expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
-  };
-};
-
-const mockFetchProducts = async (): Promise<SubscriptionProduct[]> => {
-  return [
-    {
-      productId: "com.vibecheck.subscription.monthly",
-      title: "VibeCheck Monthly",
-      description: "Unlimited access to all features",
-      price: "4.99",
-      currency: "USD",
-      subscriptionPeriod: "P1M",
-    },
-    {
-      productId: "com.vibecheck.subscription.yearly",
-      title: "VibeCheck Yearly",
-      description: "Unlimited access to all features, save 33%",
-      price: "39.99",
-      currency: "USD",
-      subscriptionPeriod: "P1Y",
-    },
-  ];
+const mapSubscriptionToProduct = (subscription: Subscription): SubscriptionProduct => {
+  if ('subscriptionPeriodNumberIOS' in subscription) {
+    const iosSubscription = subscription as SubscriptionIOS;
+    return {
+      productId: iosSubscription.productId,
+      title: iosSubscription.title,
+      description: iosSubscription.description,
+      price: iosSubscription.localizedPrice || '0',
+      currency: iosSubscription.currency || 'USD',
+      subscriptionPeriod: `P${iosSubscription.subscriptionPeriodNumberIOS || 1}${iosSubscription.subscriptionPeriodUnitIOS || 'M'}`,
+      subscriptionOfferDetails: undefined,
+    };
+  } else {
+    const androidSubscription = subscription as SubscriptionAndroid;
+    const firstPhase = androidSubscription.subscriptionOfferDetails[0]?.pricingPhases.pricingPhaseList[0];
+    const offerDetails = androidSubscription.subscriptionOfferDetails?.map(offer => ({
+      ...offer,
+      offerToken: offer.offerToken,
+    }));
+    
+    return {
+      productId: androidSubscription.productId,
+      title: androidSubscription.title,
+      description: androidSubscription.description,
+      price: firstPhase?.formattedPrice || '0',
+      currency: firstPhase?.priceCurrencyCode || 'USD',
+      subscriptionPeriod: firstPhase?.billingPeriod || 'P1M',
+      subscriptionOfferDetails: offerDetails,
+    };
+  }
 };
 
 export const createSubscriptionSlice: StateCreator<
@@ -96,102 +98,91 @@ export const createSubscriptionSlice: StateCreator<
   [],
   [],
   SubscriptionState & SubscriptionActions
-> = (set) => ({
-  // Initial state
-  isSubscribed: false,
-  subscriptionPlan: null,
-  expiryDate: null,
-  isLoading: false,
-  error: null,
-  subscriptionProducts: [],
-
-  // Actions
-  purchaseSubscription: async (productId: string, offerToken?: string) => {
-    updateSubscriptionState(set, { isLoading: true, error: null });
-
-    try {
-      // This is a stub where integration with in-app purchases would happen
-      // In a real implementation, you would call IAP methods here
-      const result = await mockPurchaseSubscription(productId, offerToken);
-
-      updateSubscriptionState(set, {
-        isSubscribed: result.isSubscribed,
-        subscriptionPlan: result.plan,
-        expiryDate: result.expiryDate,
-        isLoading: false,
-      });
-
-      return true;
-    } catch (error) {
-      console.error("Purchase error:", error);
-      updateSubscriptionState(set, {
-        isLoading: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to purchase subscription",
-      });
-      return false;
-    }
-  },
-
-  restorePurchases: async () => {
-    updateSubscriptionState(set, { isLoading: true, error: null });
-
-    try {
-      // This is a stub where integration with in-app purchases would happen
-      // In a real implementation, you would call IAP restore methods here
-      console.log("Restoring purchases");
-
-      // Simulate a successful restore with no subscriptions
-      updateSubscriptionState(set, { isLoading: false });
-      return true;
-    } catch (error) {
-      console.error("Restore error:", error);
-      updateSubscriptionState(set, {
-        isLoading: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to restore purchases",
-      });
-      return false;
-    }
-  },
-
-  setSubscriptionStatus: (
-    isSubscribed: boolean,
-    plan: SubscriptionPlan,
-    expiryDate: Date | null,
-  ) => {
+> = (set) => {
+  // Set up subscription event listener
+  subscriptionEvents.onSubscriptionUpdated((status) => {
     updateSubscriptionState(set, {
-      isSubscribed,
-      subscriptionPlan: plan,
-      expiryDate,
+      isSubscribed: status.isSubscribed,
+      subscriptionPlan: status.subscriptionType,
+      expiryDate: status.expiryDate,
     });
-  },
+  });
 
-  fetchSubscriptionProducts: async () => {
-    updateSubscriptionState(set, { isLoading: true, error: null });
+  return {
+    // Initial state
+    isSubscribed: false,
+    subscriptionPlan: null,
+    expiryDate: null,
+    isLoading: false,
+    error: null,
+    subscriptionProducts: [],
 
-    try {
-      // This is a stub where integration with in-app purchases would happen
-      // In a real implementation, you would fetch product details from IAP
-      const products = await mockFetchProducts();
+    // Actions
+    purchaseSubscription: async (productId: string, offerToken?: string) => {
+      updateSubscriptionState(set, { isLoading: true, error: null });
 
+      try {
+        await iapService.purchaseSubscription(productId, offerToken);
+        return true;
+      } catch (error) {
+        console.error("Purchase error:", error);
+        updateSubscriptionState(set, {
+          isLoading: false,
+          error: error instanceof Error ? error.message : "Failed to purchase subscription",
+        });
+        return false;
+      }
+    },
+
+    restorePurchases: async () => {
+      updateSubscriptionState(set, { isLoading: true, error: null });
+
+      try {
+        // Note: The actual restore process is handled by the purchaseUpdatedListener
+        // in the IAP service when it receives restored transactions
+        
+        updateSubscriptionState(set, { isLoading: false });
+        return true;
+      } catch (error) {
+        console.error("Restore error:", error);
+        updateSubscriptionState(set, {
+          isLoading: false,
+          error: error instanceof Error ? error.message : "Failed to restore purchases",
+        });
+        return false;
+      }
+    },
+
+    setSubscriptionStatus: (
+      isSubscribed: boolean,
+      plan: SubscriptionType | null,
+      expiryDate: Date | null,
+    ) => {
       updateSubscriptionState(set, {
-        subscriptionProducts: products,
-        isLoading: false,
+        isSubscribed,
+        subscriptionPlan: plan,
+        expiryDate,
       });
-    } catch (error) {
-      console.error("Error fetching subscription products:", error);
-      updateSubscriptionState(set, {
-        isLoading: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to fetch subscription products",
-      });
-    }
-  },
-});
+    },
+
+    fetchSubscriptionProducts: async () => {
+      updateSubscriptionState(set, { isLoading: true, error: null });
+
+      try {
+        const subscriptions = await iapService.getSubscriptionProducts();
+        const products = subscriptions.map(mapSubscriptionToProduct);
+
+        updateSubscriptionState(set, {
+          subscriptionProducts: products,
+          isLoading: false,
+        });
+      } catch (error) {
+        console.error("Error fetching subscription products:", error);
+        updateSubscriptionState(set, {
+          isLoading: false,
+          error: error instanceof Error ? error.message : "Failed to fetch subscription products",
+        });
+      }
+    },
+  };
+};

@@ -3,9 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-    webSocketService,
-    type WebSocketMessage,
-    type WebSocketMessageType,
+  webSocketService,
+  type WebSocketMessage,
+  type WebSocketMessageType,
+  type WebSocketPayloads,
 } from "@/services/WebSocketService";
 import { useStore } from "@/store";
 import { ConversationStatus } from "@/types/conversation";
@@ -57,7 +58,7 @@ export function useWebSocket() {
   }, [isSignedIn]);
 
   const send = useCallback(
-    (type: WebSocketMessageType, payload: Record<string, unknown>, topic?: string) => {
+    (type: WebSocketMessageType, payload: WebSocketPayloads[WebSocketMessageType], topic?: string) => {
       if (!isSignedIn) {
         console.warn("Cannot send WebSocket message when not signed in");
         return;
@@ -182,7 +183,7 @@ export function useWebSocketResults(conversationId: string | null) {
         // Check if this message is for our conversation
         if (message.topic !== `conversation:${conversationId}`) return;
 
-        const progress = message.payload.progress;
+        const progress = (message.payload as { progress: number }).progress;
         if (typeof progress === "number") {
           const progressPercent = Math.round(progress * 100);
           // Update progress in store and local state
@@ -248,7 +249,7 @@ export function useWebSocketResults(conversationId: string | null) {
         // Check if this message is for our conversation
         if (message.topic !== `conversation:${conversationId}`) return;
 
-        const errorMessage = message.payload.error as string || "Unknown error";
+        const errorMessage = (message.payload as { error: string }).error || "Unknown error";
         console.error(`Conversation ${conversationId} error:`, errorMessage);
 
         setError(errorMessage);
@@ -275,7 +276,7 @@ export function useWebSocketResults(conversationId: string | null) {
         // Check if this message is for our conversation
         if (message.topic !== `conversation:${conversationId}`) return;
 
-        const errorMessage = message.payload.error as string || "Processing failed";
+        const errorMessage = (message.payload as { error: string }).error || "Processing failed";
         console.error(`Conversation ${conversationId} failed:`, errorMessage);
 
         setError(errorMessage);
@@ -297,7 +298,7 @@ export function useWebSocketResults(conversationId: string | null) {
     "audio_processed",
     useCallback(
       (message: WebSocketMessage) => {
-        const audioId = Number(message.payload.audioId);
+        const audioId = Number((message.payload as { audioId: number }).audioId);
         if (!audioId) return;
 
         console.log(`Audio ${audioId} processed successfully`);
@@ -313,10 +314,10 @@ export function useWebSocketResults(conversationId: string | null) {
     "audio_failed",
     useCallback(
       (message: WebSocketMessage) => {
-        const audioId = Number(message.payload.audioId);
+        const audioId = Number((message.payload as { audioId: number }).audioId);
         if (!audioId) return;
 
-        const errorMessage = message.payload.error as string || "Unknown error";
+        const errorMessage = (message.payload as { error: string }).error || "Unknown error";
         console.error(`Audio ${audioId} processing failed:`, errorMessage);
 
         updateAudioStatus(audioId, {

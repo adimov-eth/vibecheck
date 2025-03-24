@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { AppState, Platform } from "react-native";
+import { AppState } from "react-native";
 
 import type { AudioStatusUpdate } from "@/types/recording";
 import { getClerkInstance } from "@clerk/clerk-expo";
@@ -39,14 +39,93 @@ export type WebSocketMessageType =
   | "pong"
   | "authentication_success"
   | "authentication_failed"
-  | "audio_uploaded";
+  | "audio_uploaded"
+  | "subscription_updated"
+  | "usage_updated"
+  | "user_updated";
+
+/**
+ * WebSocket message payload types
+ */
+export interface WebSocketPayloads {
+  connected: {
+    message: string;
+    userId: string;
+  };
+  conversation_progress: {
+    progress: number;
+    stage: string;
+  };
+  conversation_completed: {
+    resultUrl: string;
+  };
+  conversation_error: {
+    error: string;
+    code: string;
+  };
+  conversation_failed: {
+    error: string;
+    code: string;
+  };
+  audio_processed: {
+    audioId: number;
+    status: string;
+  };
+  audio_failed: {
+    audioId: string | number;
+    error: string;
+  };
+  subscription_updated: {
+    status: string;
+    plan: string;
+    expiresAt: string;
+  };
+  usage_updated: {
+    remainingConversations: number;
+    totalConversations: number;
+    resetDate: string;
+  };
+  user_updated: {
+    profile: {
+      name: string;
+      email: string;
+    };
+  };
+  ping: Record<string, never>;
+  pong: Record<string, never>;
+  authenticate: {
+    token: string;
+  };
+  authentication_success: {
+    userId: string;
+  };
+  authentication_failed: {
+    error: string;
+  };
+  auth_error: {
+    error: string;
+  };
+  subscribe: {
+    topic: string;
+  };
+  subscribed: {
+    topic: string;
+  };
+  unsubscribe: {
+    topic: string;
+  };
+  audio_uploaded: {
+    audioId: number;
+  };
+  [key: string]: Record<string, unknown>;
+}
 
 /**
  * WebSocket message interface
  */
 export interface WebSocketMessage {
   type: WebSocketMessageType;
-  payload: Record<string, unknown>;
+  payload: WebSocketPayloads[WebSocketMessageType];
   topic?: string;
   id?: string;
   timestamp?: string;
@@ -128,10 +207,10 @@ export class WebSocketService {
     const protocol = url.protocol === "https:" ? "wss:" : "ws:";
 
     // In development mode on iOS simulator, use localhost instead of host
-    if (__DEV__ && Platform.OS === "ios") {
-      url.hostname = "localhost";
-      url.port = "3000"; // Default development port
-    }
+    // if (__DEV__ && Platform.OS === "ios") {
+    //   url.hostname = "localhost";
+    //   url.port = "3000"; // Default development port
+    // }
 
     // Construct the WebSocket URL with the ws path
     return `${protocol}//${url.host}/ws`;
@@ -324,7 +403,7 @@ export class WebSocketService {
       this.send({
         type: "subscribe",
         topic,
-        payload: {} as Record<string, unknown>,
+        payload: {}
       });
     } else if (this.connectionState !== "connecting") {
       // If not connecting or authenticated, try to connect
@@ -347,7 +426,7 @@ export class WebSocketService {
       this.send({
         type: "unsubscribe",
         topic,
-        payload: {} as Record<string, unknown>,
+        payload: {}
       });
     }
   }
@@ -529,7 +608,7 @@ export class WebSocketService {
       this.send({
         type: "pong",
         id: message.id,
-        payload: {} as Record<string, unknown>,
+        payload: {}
       });
       return;
     }
@@ -556,6 +635,18 @@ export class WebSocketService {
       case "audio_failed":
         this.handleAudioFailed(message);
         break;
+
+      case "subscription_updated":
+        this.handleSubscriptionUpdated(message);
+        break;
+
+      case "usage_updated":
+        this.handleUsageUpdated(message);
+        break;
+
+      case "user_updated":
+        this.handleUserUpdated(message);
+        break;
     }
 
     // Dispatch to registered handlers
@@ -578,7 +669,7 @@ export class WebSocketService {
    * Update conversation progress
    */
   private updateConversationProgress(message: WebSocketMessage): void {
-    const progress = message.payload.progress as number;
+    const progress = (message.payload as { progress: number }).progress;
     if (typeof progress === "number") {
       const roundedProgress = Math.round(progress * 100);
       eventBus.emit("recording:progress", roundedProgress);
@@ -621,7 +712,7 @@ export class WebSocketService {
     const conversationId = message.topic.split(":")[1];
     if (!conversationId) return;
     
-    const errorMessage = message.payload.error as string || "Unknown error";
+    const errorMessage = (message.payload as { error: string }).error || "Unknown error";
     eventBus.emit("recording:error", errorMessage);
     
     errorService.handleRecordingError(errorMessage, {
@@ -635,7 +726,7 @@ export class WebSocketService {
    * Handle audio processed message
    */
   private handleAudioProcessed(message: WebSocketMessage): void {
-    const audioId = message.payload.audioId as number;
+    const audioId = (message.payload as { audioId: number }).audioId;
     if (typeof audioId !== "number") return;
     
     eventBus.emit("audio:status", { audioId, status: "ready" } as AudioStatusUpdate);
@@ -646,10 +737,10 @@ export class WebSocketService {
    * Handle audio failed message
    */
   private handleAudioFailed(message: WebSocketMessage): void {
-    const audioIdString = message.payload.audioId as string;
+    const audioIdString = (message.payload as { audioId: string }).audioId;
     if (!audioIdString) return;
     
-    const errorMessage = message.payload.error as string || "Unknown error";
+    const errorMessage = (message.payload as { error: string }).error || "Unknown error";
     const audioId = parseInt(audioIdString, 10);
     if (isNaN(audioId)) {
       console.error(`Invalid audio ID: ${audioIdString}`);
@@ -735,7 +826,7 @@ export class WebSocketService {
       if (this.isConnected() && this.ws?.readyState === WebSocket.OPEN) {
         this.send({
           type: "ping",
-          payload: {} as Record<string, unknown>,
+          payload: {}
         });
       }
     }, WS_PING_INTERVAL) as unknown as NodeJS.Timeout;
@@ -866,7 +957,7 @@ export class WebSocketService {
         this.send({
           type: "subscribe",
           topic,
-          payload: {} as Record<string, unknown>,
+            payload: {}
         });
       }
 
@@ -895,6 +986,58 @@ export class WebSocketService {
           );
         });
     }
+  }
+
+  /**
+   * Handle subscription updates
+   */
+  private handleSubscriptionUpdated(message: WebSocketMessage): void {
+    if (message.type !== "subscription_updated") return;
+    const payload = message.payload as WebSocketPayloads["subscription_updated"];
+    
+    // Update subscription cache
+    queryClient.setQueryData(["subscription"], {
+      isActive: true,
+      productId: payload.plan,
+      expiresDate: payload.expiresAt,
+      isInTrial: false
+    });
+    
+    // Emit event for UI updates
+    eventBus.emit("subscription:updated", payload);
+  }
+
+  /**
+   * Handle usage updates
+   */
+  private handleUsageUpdated(message: WebSocketMessage): void {
+    if (message.type !== "usage_updated") return;
+    const payload = message.payload as WebSocketPayloads["usage_updated"];
+    
+    // Update usage stats cache
+    queryClient.setQueryData(["usage"], {
+      currentUsage: payload.totalConversations,
+      remainingConversations: payload.remainingConversations,
+      resetDate: payload.resetDate,
+      isSubscribed: payload.remainingConversations === -1
+    });
+    
+    // Emit event for UI updates
+    eventBus.emit("usage:updated", payload);
+  }
+
+  /**
+   * Handle user profile updates
+   */
+  private handleUserUpdated(message: WebSocketMessage): void {
+    if (message.type !== "user_updated") return;
+    const payload = message.payload as WebSocketPayloads["user_updated"];
+    
+    // Update user profile cache
+    queryClient.setQueryData(["user"], payload.profile);
+    
+    // Emit event for UI updates
+    eventBus.emit("user:updated", payload.profile);
   }
 }
 
