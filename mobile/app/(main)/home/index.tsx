@@ -46,10 +46,7 @@ export default function Home() {
 
   // Navigate to mode details screen
   const handleSelectMode = (mode: typeof CONVERSATION_MODES[0]) => {
-    router.push({
-      pathname: `./home/${mode.id}`,
-      params: { id: mode.id }
-    });
+    router.push(`/home/${mode.id}`);
   };
 
   return (
@@ -86,6 +83,7 @@ export default function Home() {
               <ModeCard
                 key={mode.id}
                 id={mode.id}
+                mode={mode.id}
                 title={mode.title}
                 description={mode.description}
                 color={mode.color}

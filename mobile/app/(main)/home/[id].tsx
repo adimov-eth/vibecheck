@@ -65,6 +65,7 @@ export default function ModeDetails() {
         <View style={styles.cardContainer}>
           <ModeCard
             id={mode.id}
+            mode={mode.id}
             title={mode.title}
             description={mode.description}
             color={mode.color}
