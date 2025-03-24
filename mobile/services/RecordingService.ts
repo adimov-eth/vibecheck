@@ -3,6 +3,11 @@ import * as Crypto from "expo-crypto";
 import * as FileSystem from "expo-file-system";
 import { Platform } from "react-native";
 
+import type {
+  RecordingMode,
+  RecordingServiceStatus,
+  RecordingStatus
+} from "@/types/recording";
 import { apiClient } from "./api";
 import { errorService, handleError } from "./ErrorService";
 import { eventBus } from "./EventBus";
@@ -13,23 +18,6 @@ import { webSocketService } from "./WebSocketService";
 const AUDIO_DIRECTORY = `${FileSystem.documentDirectory}audio/`;
 
 // Types
-export type RecordingMode = "separate" | "live";
-
-export type RecordingStatus =
-  | "idle"
-  | "requesting-permissions"
-  | "permission-denied"
-  | "preparing"
-  | "recording"
-  | "stopping"
-  | "stopped"
-  | "failed";
-
-export interface AudioStatus {
-  status: "uploading" | "uploaded" | "processing" | "transcribed" | "failed";
-  error?: string;
-}
-
 export interface RecordingResult {
   uri: string;
   duration: number;
@@ -891,31 +879,15 @@ export class RecordingService {
   }
 
   /**
-   * Get current status information
+   * Get current recording status
    */
-  public getStatus(): {
-    recordingStatus: RecordingStatus;
-    recordingMode: RecordingMode;
-    currentPartner: 1 | 2;
-    conversationId: string | null;
-    recordingDuration: number;
-    processingProgress: number;
-    error: string | null;
-    hasPermission: boolean;
-    isRecording: boolean;
-    isReleased: boolean;
-  } {
+  public getStatus(): RecordingServiceStatus {
     return {
-      recordingStatus: this.recordingStatus,
-      recordingMode: this.recordingMode,
-      currentPartner: this.currentPartner,
+      status: this.recordingStatus,
       conversationId: this.conversationId,
-      recordingDuration: this.recordingDuration,
-      processingProgress: this.processingProgress,
-      error: this.error,
-      hasPermission: this.hasPermission,
-      isRecording: this.recordingStatus === "recording",
-      isReleased: this.isReleased,
+      currentPartner: this.currentPartner,
+      recordingMode: this.recordingMode,
+      error: this.error
     };
   }
 

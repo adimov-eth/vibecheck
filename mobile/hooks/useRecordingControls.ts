@@ -1,8 +1,7 @@
 import {
-    recordingService,
-    type RecordingMode,
-    type RecordingStatus
+  recordingService
 } from "@/services/RecordingService";
+import type { RecordingMode, RecordingStatus } from "@/types/recording";
 import { handleError } from "@/utils/errorUtils";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRecordingStore } from "./useTypedStore";
@@ -36,7 +35,7 @@ export function useRecordingControls(
   const [state, setState] = useState<RecordingControlsState>({
     recordMode: "separate",
     currentPartner: 1,
-    recordingStatus: recordingService.getStatus().recordingStatus,
+    recordingStatus: recordingService.getStatus().status,
     recordingDuration: 0,
     conversationId: null,
     partner1Uri: null,

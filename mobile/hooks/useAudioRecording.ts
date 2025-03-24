@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import {
-  recordingService,
-  type RecordingStatus
-} from "@/services/RecordingService";
+import { recordingService } from "@/services/RecordingService";
+import type { RecordingStatus } from "@/types/recording";
 
 /**
  * Audio recording hook interface
@@ -26,14 +24,14 @@ export interface AudioRecordingHook {
 export function useAudioRecording(): AudioRecordingHook {
   // State for UI updates
   const [status, setStatus] = useState<RecordingStatus>(
-    () => recordingService.getStatus().recordingStatus
+    () => recordingService.getStatus().status
   );
   const [duration, setDuration] = useState<number>(0);
   const [isReleased, setIsReleased] = useState<boolean>(
-    recordingService.getStatus().isReleased
+    recordingService.getStatus().isReleased ?? false
   );
   const [hasPermission, setHasPermission] = useState<boolean>(
-    recordingService.getStatus().hasPermission
+    recordingService.getStatus().hasPermission ?? false
   );
 
   // Update UI on status change
@@ -48,9 +46,9 @@ export function useAudioRecording(): AudioRecordingHook {
     // Set up a timer to sync UI state with service state
     const statusTimer = setInterval(() => {
       const serviceStatus = recordingService.getStatus();
-      setDuration(serviceStatus.recordingDuration);
-      setIsReleased(serviceStatus.isReleased);
-      setHasPermission(serviceStatus.hasPermission);
+      setDuration(serviceStatus.recordingDuration ?? 0);
+      setIsReleased(serviceStatus.isReleased ?? false);
+      setHasPermission(serviceStatus.hasPermission ?? false);
     }, 500);
     
     return () => {

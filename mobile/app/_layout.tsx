@@ -9,7 +9,9 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { useReactQueryDevTools } from '@dev-plugins/react-query';
+
+import "@/store/listeners";
 import { ToastProvider } from "../components/ui/Toast";
 import { networkService } from "../services/NetworkService";
 import { queryClient, setupNetworkListeners } from "../services/QueryClient";
@@ -68,27 +70,35 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
   const { initializeApp, setLoggedIn } = useStore();
 
   useEffect(() => {
+    let isMounted = true;
+
     const initializeServices = async () => {
-      // Initialize app state
-      await initializeApp();
+      if (!isMounted) return;
 
-      // Initialize network monitoring
-      networkService.init();
+      try {
+        // Initialize app state
+        await initializeApp();
 
-      // Set up React Query network listeners
-      setupNetworkListeners();
+        // Initialize network monitoring
+        networkService.init();
 
-      // Set authentication state based on Clerk's auth state
-      if (isSignedIn) {
-        try {
-          const token = await getToken();
-          setLoggedIn(true, token || undefined);
-        } catch (error) {
+        // Set up React Query network listeners
+        setupNetworkListeners();
+
+        // Set authentication state based on Clerk's auth state
+        if (isMounted) {
+          if (isSignedIn) {
+            const token = await getToken();
+            setLoggedIn(true, token || undefined);
+          } else {
+            setLoggedIn(false);
+          }
+        }
+      } catch (error) {
+        if (isMounted) {
           setLoggedIn(false);
           handleError(error);
         }
-      } else {
-        setLoggedIn(false);
       }
     };
 
@@ -96,9 +106,10 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
 
     // Cleanup on unmount
     return () => {
+      isMounted = false;
       networkService.cleanup();
     };
-  }, [initializeApp, setLoggedIn, isSignedIn, getToken]);
+  }, [isSignedIn]); // Only depend on isSignedIn state
 
   return <>{children}</>;
 };
@@ -108,7 +119,7 @@ const AppInitializer: React.FC<AppInitializerProps> = ({ children }) => {
  */
 export default function RootLayout() {
   const persister = createQueryPersister();
-
+  useReactQueryDevTools(queryClient);
   return (
     <ClerkProvider
       publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
@@ -125,7 +136,7 @@ export default function RootLayout() {
           console.log("React Query cache restored from persistence");
         }}
       >
-        {__DEV__ && <ReactQueryDevtools initialIsOpen={false} />}
+        {/* {__DEV__ && <ReactQueryDevtools initialIsOpen={false} />} */}
         <SafeAreaProvider>
           <StatusBar style="auto" />
           <AppInitializer>

@@ -3,9 +3,9 @@ import { Redirect } from 'expo-router';
 import React from 'react';
 
 export default function Index() {
-  const { isAuthenticated, tokenStatus } = useAuthStore();
+  const { isAuthenticated } = useAuthStore();
   
-  if (isAuthenticated && tokenStatus === 'valid') {
+  if (isAuthenticated) {
     return <Redirect href="/home" />;
   }
   

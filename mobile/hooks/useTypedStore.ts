@@ -1,7 +1,7 @@
-import type { AudioStatus } from "@/services/RecordingService";
 import type { StoreActions, StoreState } from "@/store";
 import { useStore } from "@/store";
 import type { AppTheme } from "@/store/appSlice";
+import type { AudioStatus } from "@/types/recording";
 import { SubscriptionType } from "@/types/subscription";
 import { useShallow } from 'zustand/react/shallow';
 
