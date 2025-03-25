@@ -4,15 +4,14 @@ import useStore from '@/state';
 import { useEffect } from 'react';
 
 const ErrorDisplay = () => {
-  const wsError = useStore((state) => state.error);
+  const wsMessages = useStore((state) => state.wsMessages);
+  const latestError = wsMessages[wsMessages.length - 1]?.type === 'error' ? wsMessages[wsMessages.length - 1].payload.error : null;
 
   useEffect(() => {
-    if (wsError) {
-      showToast.error('WebSocket Error', wsError);
-      // Optional: Clear error after displaying
-      // useStore.getState().setWsError(null);
+    if (latestError) {
+      showToast.error('WebSocket Error', latestError);
     }
-  }, [wsError]);
+  }, [latestError]);
 
   return null; // No UI, just a listener
 };

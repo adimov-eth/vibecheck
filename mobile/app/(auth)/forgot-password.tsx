@@ -1,7 +1,9 @@
+import { ErrorMessage } from "@/components/feedback/ErrorMessage";
 import { FormField } from "@/components/forms/FormField";
 import { PasswordInput } from "@/components/forms/PasswordInput";
 import { Container } from "@/components/layout/Container";
 import { Button } from "@/components/ui/Button";
+import { showToast } from "@/components/ui/Toast";
 import { colors, spacing, typography } from "@/constants/styles";
 import { useSignIn } from "@clerk/clerk-expo";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -27,6 +29,7 @@ export default function ForgotPassword() {
   const router = useRouter();
   const { signIn, setActive, isLoaded } = useSignIn();
   const [successfulCreation, setSuccessfulCreation] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const {
     control: resetControl,
@@ -53,6 +56,7 @@ export default function ForgotPassword() {
 
   const onRequestCode: SubmitHandler<ResetFormData> = async (data) => {
     if (!isLoaded || !signIn) return;
+    setError(null);
 
     try {
       await signIn.create({
@@ -60,17 +64,19 @@ export default function ForgotPassword() {
         identifier: data.email,
       });
       setSuccessfulCreation(true);
+      showToast.success("Reset code sent", "Please check your email for the reset code");
     } catch (err) {
-      if (err instanceof Error) {
-        throw new Error(err.message || "Failed to send reset code");
-      } else {
-        throw new Error("An unexpected error occurred");
-      }
+      console.error("Reset code request failed:", err);
+      const errorMsg = err instanceof Error ? 
+        err.message : "Failed to send reset code. Please try again.";
+      setError(errorMsg);
+      showToast.error("Error", errorMsg);
     }
   };
 
   const onVerifyCode: SubmitHandler<VerifyFormData> = async (data) => {
     if (!isLoaded || !signIn) return;
+    setError(null);
 
     try {
       const result = await signIn.attemptFirstFactor({
@@ -81,16 +87,17 @@ export default function ForgotPassword() {
 
       if (result.status === "complete") {
         await setActive({ session: result.createdSessionId });
-        router.replace("/home");
+        showToast.success("Success", "Password reset successful");
+        router.replace("/home" as any);
       } else {
         throw new Error(`Verification failed: ${result.status}`);
       }
     } catch (err) {
-      if (err instanceof Error) {
-        throw new Error(err.message || "Failed to reset password");
-      } else {
-        throw new Error("An unexpected error occurred");
-      }
+      console.error("Password reset failed:", err);
+      const errorMsg = err instanceof Error ? 
+        err.message : "Failed to reset password. Please try again.";
+      setError(errorMsg);
+      showToast.error("Error", errorMsg);
     }
   };
 
@@ -99,6 +106,8 @@ export default function ForgotPassword() {
       <View style={styles.header}>
         <Text style={styles.title}>Forgot Password?</Text>
       </View>
+
+      {error && <ErrorMessage message={error} testID="auth-error" />}
 
       {!successfulCreation ? (
         <>
@@ -174,7 +183,7 @@ export default function ForgotPassword() {
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>Remember your password?</Text>
-        <Link href="/(auth)/sign-in" style={styles.signInLink}>
+        <Link href={"/sign-in" as any} style={styles.signInLink}>
           <Text style={styles.signInText}>Sign in</Text>
         </Link>
       </View>

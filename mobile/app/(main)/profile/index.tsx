@@ -1,43 +1,112 @@
 import { AppBar } from '@/components/layout/AppBar';
 import { Button } from '@/components/ui/Button';
 import { colors, layout, spacing, typography } from '@/constants/styles';
-import useStore from '@/state';
+import { useUsage } from '@/hooks/useUsage';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import { useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
 
 export default function Profile() {
   const router = useRouter();
   const { user } = useUser();
   const { signOut } = useAuth();
-  const store = useStore();
+  const { 
+    subscriptionStatus,
+    usageStats,
+    loading,
+    error,
+    loadData 
+  } = useUsage();
 
   useEffect(() => {
-    store.checkSubscriptionStatus().catch(() => {});
-    store.getUsageStats().catch(() => {});
-  }, [store]);
+    const fetchData = async () => {
+      try {
+        // Only fetch if we don't have the data already
+        if (!subscriptionStatus || !usageStats) {
+          await Promise.all([
+            loadData()
+          ]);
+        }
+      } catch (err) {
+        console.error('[Profile] Failed to fetch data:', err);
+      }
+    };
+    
+    fetchData();
+  }, []); // Only run on mount
 
   const handleBackPress = () => router.back();
   const handleSignOut = async () => await signOut();
-  const navigateToUpdatePassword = () => router.push('/profile/update-password');
-  const navigateToPaywall = () => router.push('/paywall');
+  const navigateToUpdatePassword = () => router.push('./update-password');
+  const navigateToPaywall = () => router.push('./paywall');
 
-  const isSubscribed = store.subscriptionStatus?.active ?? false;
-  const subscriptionPlan = store.subscriptionStatus?.plan ?? 'none';
-  const expiryDate = store.subscriptionStatus?.expiresAt;
-  const remainingConversations = store.usageStats?.remainingMinutes ?? 0;
-  const currentUsage = store.usageStats?.totalMinutes || 0;
-  const usageLimit = store.usageStats ? 
-    (store.usageStats.totalMinutes + store.usageStats.remainingMinutes) : 0;
+  const isSubscribed = subscriptionStatus?.isActive ?? false;
+  const subscriptionPlan = subscriptionStatus?.type ?? 'none';
+  const expiryDate = subscriptionStatus?.expiresDate;
+  const remainingConversations = usageStats?.remainingConversations ?? 0;
+  const currentUsage = usageStats?.currentUsage || 0;
+  const usageLimit = usageStats ? 
+    (usageStats.currentUsage + usageStats.remainingConversations) : 0;
   
-  // Calculate reset date as 30 days from subscription start or last reset
+  // Format the reset date based on the subscription expiry date
   const getFormattedResetDate = () => {
     if (!expiryDate) return 'Unknown';
-    const resetDate = new Date(expiryDate);
-    resetDate.setDate(resetDate.getDate() - 30); // Show next reset date
-    return resetDate.toLocaleDateString();
+    
+    const now = new Date();
+    const expiry = new Date(expiryDate);
+    
+    // If expired, show as "Unknown"
+    if (expiry < now) {
+      return 'Unknown';
+    }
+    
+    // Format the expiry date
+    return expiry.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <AppBar 
+          title="Profile" 
+          showBackButton={true} 
+          onBackPress={handleBackPress} 
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <AppBar 
+          title="Profile" 
+          showBackButton={true} 
+          onBackPress={handleBackPress} 
+        />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error.message || 'Failed to load profile data'}</Text>
+          <Button 
+            title="Retry" 
+            variant="primary"
+            onPress={() => router.replace('/profile')}
+            style={styles.retryButton}
+          />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -173,19 +242,19 @@ export default function Profile() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
-  },
+    backgroundColor: colors.background.primary,
+  } as ViewStyle,
   container: {
     flex: 1,
-    backgroundColor: colors.background,
-  },
+    backgroundColor: colors.background.primary,
+  } as ViewStyle,
   contentContainer: {
     padding: spacing.lg,
-  },
+  } as ViewStyle,
   profileHeader: {
     alignItems: 'center',
     marginVertical: spacing.xl,
-  },
+  } as ViewStyle,
   avatarContainer: {
     width: 80,
     height: 80,
@@ -194,81 +263,106 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: spacing.md,
-    ...layout.cardShadow,
-  },
+    ...layout.shadows.small,
+  } as ViewStyle,
   avatarText: {
     fontSize: 32,
-    color: colors.white,
+    color: colors.text.inverse,
     fontFamily: 'Inter-Bold',
-  },
+  } as TextStyle,
   userName: {
     ...typography.heading2,
     marginBottom: spacing.xs,
-  },
+  } as TextStyle,
   userEmail: {
     ...typography.body1,
-    color: colors.mediumText,
-  },
+    color: colors.text.secondary,
+  } as TextStyle,
   section: {
     marginBottom: spacing.xl,
-  },
+  } as ViewStyle,
   sectionTitle: {
     ...typography.heading3,
     marginBottom: spacing.md,
-  },
+  } as TextStyle,
   card: {
-    backgroundColor: colors.cardBackground,
-    borderRadius: layout.borderRadius.medium,
+    backgroundColor: colors.background.surface,
+    borderRadius: layout.borderRadius.lg,
     padding: spacing.lg,
-    ...layout.cardShadow,
-  },
+    ...layout.shadows.small,
+  } as ViewStyle,
   button: {
     marginBottom: spacing.md,
-  },
+  } as ViewStyle,
   buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: spacing.sm,
-  },
+  } as ViewStyle,
   buttonLabel: {
     ...typography.body2,
     flex: 1,
     marginRight: spacing.md,
-  },
+  } as TextStyle,
   subscriptionStatusContainer: {
     marginBottom: spacing.lg,
-  },
+  } as ViewStyle,
   subscriptionInfo: {
     marginBottom: spacing.md,
-  },
+  } as ViewStyle,
   subscriptionLabel: {
     ...typography.caption,
-    color: colors.mediumText,
+    color: colors.text.secondary,
     marginBottom: spacing.xs,
-  },
+  } as TextStyle,
   subscriptionStatus: {
     ...typography.heading3,
     fontWeight: '600',
-  },
+  } as TextStyle,
   statusPremium: {
-    color: colors.success,
-  },
+    color: colors.status.success,
+  } as TextStyle,
   statusFree: {
     color: colors.primary,
-  },
+  } as TextStyle,
   subscriptionValue: {
     ...typography.body1,
-  },
+  } as TextStyle,
   resetDateText: {
     ...typography.caption,
-    color: colors.mediumText,
+    color: colors.text.secondary,
     marginTop: spacing.xs,
-  },
+  } as TextStyle,
   devContainer: {
     marginTop: spacing.md,
     paddingTop: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-  },
+  } as ViewStyle,
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  } as ViewStyle,
+  loadingText: {
+    ...typography.body1,
+    color: colors.text.secondary,
+    marginTop: spacing.md,
+  } as TextStyle,
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  } as ViewStyle,
+  errorText: {
+    ...typography.body1,
+    color: colors.error,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  } as TextStyle,
+  retryButton: {
+    minWidth: 120,
+  } as ViewStyle,
 });

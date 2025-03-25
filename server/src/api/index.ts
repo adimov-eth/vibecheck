@@ -1,137 +1,99 @@
-// server/src/api/index.ts
+// src/api/index.ts
+import { config } from '@/config';
+import { getUserId } from '@/middleware/auth'; // Import getUserId
+import { ensureUser } from '@/middleware/ensure-user';
+import { AuthenticationError, handleError } from '@/middleware/error'; // Import AuthenticationError
+import { apiRateLimiter } from '@/middleware/rate-limit';
+import { getUserUsageStats } from '@/services/usage-service'; // Import getUserUsageStats
+import { logger } from '@/utils/logger';
+import type { ExpressRequestWithAuth } from '@clerk/express';
 import { clerkMiddleware } from '@clerk/express';
 import cors from 'cors';
-import crypto from 'crypto';
-import dotenv from 'dotenv';
-import express, { ErrorRequestHandler, RequestHandler } from 'express';
+import type { NextFunction, Request, Response } from 'express';
+import express from 'express';
 import helmet from 'helmet';
-import http from 'http';
-import { config } from '../config';
-import { createOrUpdateUser, deleteUser } from '../services/user.service';
-import { logger } from '../utils/logger.utils';
-import { websocketManager } from '../utils/websocket.utils';
-import { dbMiddleware, PooledDatabase } from './middleware/db.middleware';
-import { errorHandler } from './middleware/error.middleware';
-import {
-  audioRateLimiter,
-  authRateLimiter,
-  conversationsRateLimiter,
-  defaultRateLimiter,
-  subscriptionsRateLimiter,
-  usageRateLimiter
-} from './middleware/rate-limit.middleware';
-import audioRoutes from './routes/audio.routes';
-import authRoutes from './routes/auth.routes';
-import conversationRoutes from './routes/conversation.routes';
-import subscriptionRoutes from './routes/subscription.routes';
-import usageRoutes from './routes/usage.routes';
-import userRoutes from './routes/user.route';
+import audioRoutes from './routes/audio';
+import conversationRoutes from './routes/conversation';
+import subscriptionRoutes from './routes/subscription';
+import userRoutes from './routes/user';
+import webhookRoutes from './routes/webhook';
 
-dotenv.config();
+// Create Express app
+export const app = express();
 
-// Extend Express Request type
-declare module 'express' {
-  interface Request {
-    db?: PooledDatabase;
-  }
-}
+// Apply middleware
+app.use(helmet());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
-export const createApp = () => {
-  const app = express();
-  const server = http.createServer(app);
-
-  app.use(helmet());
-  app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  }));
+// Request logger
+app.use((req, res, next) => {
+  logger.debug(`${req.method} ${req.path}`);
+  const start = Date.now();
   
-  app.use(clerkMiddleware({ secretKey: config.clerkSecretKey }));
-  app.use(defaultRateLimiter as RequestHandler);
-  app.use(dbMiddleware as RequestHandler);
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
-
-  const requestLogger: RequestHandler = (req, res, next) => {
-    logger.debug(`${req.method} ${req.path}`);
-    next();
-  };
-  app.use(requestLogger);
-
-  app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok' });
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.debug(`${req.method} ${req.path} ${res.statusCode} - ${duration}ms`);
   });
+  
+  next();
+});
 
-  // Custom webhook endpoint for Clerk user synchronization
-  app.post('/webhooks/clerk', async (req, res) => {
-    try {
-      const payload = JSON.stringify(req.body);
-      const headers = req.headers;
+// Webhook routes first (before body parsing)
+app.use('/api', webhookRoutes);
 
-      // Verify webhook signature
-      const signature = headers['x-clerk-signature'] as string;
-      const timestamp = headers['x-clerk-timestamp'] as string;
-      const signingSecret = config.clerkWebhookSecret;
-
-      if (!signingSecret) {
-        throw new Error('CLERK_WEBHOOK_SECRET is not defined');
-      }
-
-      const computedSignature = crypto
-        .createHmac('sha256', signingSecret)
-        .update(`${timestamp}.${payload}`)
-        .digest('hex');
-
-      if (computedSignature !== signature) {
-        throw new Error('Invalid signature');
-      }
-
-      const event = req.body;
-
-      switch (event.type) {
-        case 'user.created':
-        case 'user.updated':
-          await createOrUpdateUser({
-            id: event.data.id,
-            email: event.data.email_addresses?.[0]?.email_address,
-            name: `${event.data.first_name || ''} ${event.data.last_name || ''}`.trim() || undefined,
-          }, req.db!);
-          logger.info(`User ${event.type}: ${event.data.id}`);
-          break;
-        case 'user.deleted':
-          await deleteUser(event.data.id, req.db!);
-          logger.info(`User deleted: ${event.data.id}`);
-          break;
-        default:
-          logger.warn(`Unhandled webhook event type: ${event.type}`);
-      }
-
-      res.status(200).json({ success: true });
-    } catch (error) {
-      logger.error(`Webhook error: ${error instanceof Error ? error.message : String(error)}`);
-      res.status(400).json({ error: 'Webhook processing failed', details: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-  // Mount routes with rate limiting
-  app.use('/auth', authRateLimiter as RequestHandler, authRoutes);
-  app.use('/conversations', conversationsRateLimiter as RequestHandler, conversationRoutes);
-  app.use('/audio', audioRateLimiter as RequestHandler, audioRoutes);
-  app.use('/subscriptions', subscriptionsRateLimiter as RequestHandler, subscriptionRoutes);
-  app.use('/usage', usageRateLimiter as RequestHandler, usageRoutes);
-  app.use('/users', usageRateLimiter as RequestHandler, userRoutes);
-
-  app.use((req, res) => {
-    res.status(404).json({ error: 'Not Found', message: 'The requested resource was not found' });
-  });
-
-  app.use(errorHandler as ErrorRequestHandler);
-
-  if (config.webSocket.enabled) {
-    websocketManager.initialize(server);
-    logger.info('WebSocket server initialized');
+// Parse JSON requests (skip for webhook routes)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    return next();
   }
+  express.json()(req, res, next);
+});
 
-  return server;
-};
+// Clerk authentication
+app.use(clerkMiddleware({
+  secretKey: config.clerkSecretKey
+}));
+
+// Ensure user exists in database
+app.use(ensureUser);
+
+// Default rate limiter
+app.use(apiRateLimiter);
+
+// Health check endpoint
+app.get('/health', (_, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// Routes
+app.use('/audio', audioRoutes);
+app.use('/conversations', conversationRoutes);
+app.use('/subscriptions', subscriptionRoutes);
+app.use('/users', userRoutes);
+
+// Usage stats endpoint
+app.get('/usage/stats', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = getUserId(req as ExpressRequestWithAuth);
+    if (!userId) {
+      throw new AuthenticationError('Unauthorized: No user ID found');
+    }
+    
+    const usageStats = await getUserUsageStats(userId);
+    res.json(usageStats);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// 404 handler
+app.use((_, res) => {
+  res.status(404).json({ error: 'Not Found' });
+});
+
+// Error handler
+app.use(handleError);

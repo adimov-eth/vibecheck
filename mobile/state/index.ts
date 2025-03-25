@@ -1,7 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, devtools, persist } from "zustand/middleware";
-import { createAuthSlice } from "./slices/authSlice";
 import { createConversationSlice } from "./slices/conversationSlice";
 import { createSubscriptionSlice } from "./slices/subscriptionSlice";
 import { createUploadSlice } from "./slices/uploadSlice";
@@ -12,7 +11,6 @@ const useStore = create<StoreState>()(
   devtools(
     persist(
       (...a) => ({
-        ...createAuthSlice(...a),
         ...createConversationSlice(...a),
         ...createUploadSlice(...a),
         ...createSubscriptionSlice(...a),
@@ -22,12 +20,13 @@ const useStore = create<StoreState>()(
         name: "vibecheck-storage",
         storage: createJSONStorage(() => AsyncStorage),
         partialize: (state) => ({
-          userProfile: state.userProfile,
           conversations: state.conversations,
           subscriptionStatus: state.subscriptionStatus,
           usageStats: state.usageStats,
           subscriptionProducts: state.subscriptionProducts,
         }),
+        version: 1,
+        skipHydration: true,
       }
     )
   )

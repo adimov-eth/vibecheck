@@ -22,26 +22,18 @@ export type UploadResult =
   | { success: false; error: string; audioUri: string; conversationId: string; audioKey: string };
 
 export interface SubscriptionStatus {
-  active: boolean;
-  plan: string;
-  expiresAt: string;
+  isActive: boolean;
+  expiresDate: number | null;
+  type: string | null;
+  subscriptionId: number | null;
 }
 
 export interface UsageStats {
-  totalConversations: number;
-  totalMinutes: number;
-  remainingMinutes: number;
-}
-
-export interface AuthSlice {
-  token: string | null;
-  userProfile: User | null;
-  authLoading: boolean;
-  error: string | null;
-  setError: (error: string | null) => void;
-  fetchToken: () => Promise<string | null>;
-  getUserProfile: () => Promise<User | null>;
-  logout: () => Promise<void>;
+  currentUsage: number;
+  limit: number;
+  isSubscribed: boolean;
+  remainingConversations: number;
+  resetDate: number;
 }
 
 export interface ConversationSlice {
@@ -72,6 +64,7 @@ export interface WebSocketMessage {
     content?: string;
     error?: string;
     status?: string;
+    gptResponse?: string;
   };
   timestamp: string;
 }
@@ -89,6 +82,7 @@ export interface SubscriptionSlice {
   cleanupStore: () => void;
   purchaseSubscription: (productId: string, offerToken?: string) => Promise<void>;
   restorePurchases: () => Promise<void>;
+  setInitialUsageStats: (stats: UsageStats) => void;
 }
 
 export interface WebSocketSlice {
@@ -98,16 +92,19 @@ export interface WebSocketSlice {
   maxReconnectAttempts: number;
   reconnectInterval: number;
   maxReconnectDelay: number;
+  isConnecting: boolean;
   calculateBackoff: () => number;
   connectWebSocket: () => Promise<void>;
   subscribeToConversation: (conversationId: string) => void;
+  unsubscribeFromConversation: (conversationId: string) => void;
   clearMessages: () => void;
 }
 
 export interface PendingUpload {
-  localConversationId: string;
   audioUri: string;
-  audioKey: string; // e.g., "1" or "2" to distinguish audio files
+  conversationId: string;
+  audioKey: string;
+  localConversationId?: string;  // Making this optional since it's not always needed
 }
 
 export interface UploadSlice {
@@ -132,8 +129,7 @@ export interface SubscriptionProduct {
   }[];
 }
 
-export type StoreState = AuthSlice &
-  ConversationSlice &
+export type StoreState = ConversationSlice &
   UploadSlice &
   SubscriptionSlice &
   WebSocketSlice;
@@ -143,5 +139,5 @@ export interface StoreActions {
   getUserProfile: () => Promise<User | null>;
 }
 
-export const API_BASE_URL = "https://v.bkk.lol/api/v1";
-export const WS_URL = "ws://v.bkk.lol/ws";
+export const API_BASE_URL = "https://v.bkk.lol";
+export const WS_URL = "wss://v.bkk.lol/ws";

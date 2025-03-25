@@ -6,7 +6,7 @@ import { colors, spacing, typography } from '@/constants/styles';
 import { useUsage } from '@/hooks';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
 
 // Define the Mode interface since we're using it locally
 interface Mode {
@@ -47,9 +47,9 @@ export default function ModeDetails() {
   }, [router]);
 
   const startRecording = async () => {
-    const canCreate = await checkCanCreateConversation(true);
+    const canCreate = await checkCanCreateConversation();
     if (canCreate) {
-      router.push(`/recording/${mode.id}`);
+      router.push(`../recording/${mode.id}`);
     }
   };
 
@@ -128,29 +128,29 @@ function getModeColor(modeId: string): string {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
-  },
+    backgroundColor: colors.background.primary,
+  } as ViewStyle,
   content: {
     flex: 1,
     paddingHorizontal: spacing.lg,
-  },
+  } as ViewStyle,
   cardContainer: {
     marginTop: spacing.lg,
     marginBottom: spacing.lg,
-  },
+  } as ViewStyle,
   descriptionContainer: {
     flex: 1,
-  },
+  } as ViewStyle,
   descriptionTitle: {
     ...typography.heading3,
     marginBottom: spacing.md,
-    color: colors.darkText,
-  },
+    color: colors.text.primary,
+  } as TextStyle,
   description: {
     ...typography.body1,
-    color: colors.mediumText,
-  },
+    color: colors.text.secondary,
+  } as TextStyle,
   buttonContainer: {
     paddingVertical: spacing.xl,
-  },
+  } as ViewStyle,
 });

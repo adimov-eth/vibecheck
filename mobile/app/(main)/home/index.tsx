@@ -1,11 +1,12 @@
 import { ModeCard } from '@/components/conversation/ModeCard';
 import { AppBar } from '@/components/layout/AppBar';
 import { Container } from '@/components/layout/Container';
+import { Button } from '@/components/ui/Button';
 import { colors, spacing, typography } from '@/constants/styles';
-import useStore from '@/state';
+import { useUsage } from '@/hooks/useUsage';
 import { useRouter } from 'expo-router';
-import React, { useEffect } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 // Define the available conversation modes
 const CONVERSATION_MODES = [
@@ -40,29 +41,31 @@ export default function Home() {
   const { 
     subscriptionStatus,
     usageStats,
-    checkSubscriptionStatus,
-    getUsageStats
-  } = useStore();
+    loading,
+    error,
+    checkCanCreateConversation,
+    loadData
+  } = useUsage();
+  const initialLoadRef = useRef(false);
 
-  // Fetch subscription and usage data on mount
+  // Load usage stats on mount only once
   useEffect(() => {
-    checkSubscriptionStatus().catch(console.error);
-    getUsageStats().catch(console.error);
-  }, [checkSubscriptionStatus, getUsageStats]);
-
-  // Loading state - when both subscription and usage stats are null
-  const isLoading = !subscriptionStatus && !usageStats;
-  
-  // Error state - when either subscription or usage stats failed to load
-  const error = !subscriptionStatus || !usageStats;
+    if (!initialLoadRef.current) {
+      initialLoadRef.current = true;
+      loadData();
+    }
+  }, [loadData]);
 
   // Navigate to mode details screen
-  const handleSelectMode = (mode: typeof CONVERSATION_MODES[0]) => {
-    router.push(`/home/${mode.id}`);
+  const handleSelectMode = async (mode: typeof CONVERSATION_MODES[0]) => {
+    const canCreate = await checkCanCreateConversation();
+    if (canCreate) {
+      router.push(`/home/${mode.id}`);
+    }
   };
 
   // Loading state
-  if (isLoading) {
+  if (loading && !usageStats) {
     return (
       <Container withSafeArea>
         <AppBar title="VibeCheck" />
@@ -80,11 +83,21 @@ export default function Home() {
       <Container withSafeArea>
         <AppBar title="VibeCheck" />
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Failed to load subscription data</Text>
+          <Text style={styles.errorText}>{error.message || 'Failed to load subscription data'}</Text>
+          <Button 
+            title="Retry" 
+            variant="primary"
+            onPress={loadData}
+            style={styles.retryButton}
+          />
         </View>
       </Container>
     );
   }
+
+  const remainingConversations = usageStats?.remainingConversations ?? 0;
+  const isSubscribed = subscriptionStatus?.isActive ?? false;
+  const subscriptionType = subscriptionStatus?.type;
 
   return (
     <Container withSafeArea>
@@ -93,6 +106,13 @@ export default function Home() {
       <ScrollView 
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={loadData}
+            colors={[colors.primary]}
+          />
+        }
       >
         <View style={styles.headerContainer}>
           <Text style={styles.headerSubtitle}>
@@ -102,9 +122,9 @@ export default function Home() {
         
         <View style={styles.usageContainer}>
           <Text style={styles.usageText}>
-            {subscriptionStatus?.active ? 
-              `Unlimited conversations (${subscriptionStatus.plan})` : 
-              `${usageStats?.remainingMinutes || 0} of ${usageStats?.totalMinutes || 0} minutes left`
+            {isSubscribed ? 
+              `Unlimited conversations (${subscriptionType})` : 
+              `${remainingConversations} conversation${remainingConversations !== 1 ? 's' : ''} left`
             }
           </Text>
         </View>
@@ -203,5 +223,9 @@ const styles = StyleSheet.create({
     ...typography.body1,
     color: colors.error,
     textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: spacing.md,
+    minWidth: 120,
   },
 });

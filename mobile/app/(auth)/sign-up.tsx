@@ -1,19 +1,22 @@
+import { ErrorMessage } from "@/components/feedback/ErrorMessage";
 import { FormField } from "@/components/forms/FormField";
 import { PasswordInput } from "@/components/forms/PasswordInput";
 import { Container } from "@/components/layout/Container";
 import { Button } from "@/components/ui/Button";
+import { showToast } from "@/components/ui/Toast";
 import { colors, spacing, typography } from "@/constants/styles";
 import { signUpSchema, type SignUpFormData } from "@/validations/auth";
 import { useSignUp } from "@clerk/clerk-expo";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link, useRouter } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import { Controller, SubmitHandler, useForm } from "react-hook-form";
 import { StyleSheet, Text, View } from "react-native";
 
 export default function SignUp() {
   const router = useRouter();
   const { signUp, setActive, isLoaded } = useSignUp();
+  const [error, setError] = useState<string | null>(null);
 
   const {
     control,
@@ -30,6 +33,7 @@ export default function SignUp() {
 
   const onSubmit: SubmitHandler<SignUpFormData> = async (data) => {
     if (!isLoaded || !signUp) return;
+    setError(null);
 
     try {
       // Start the sign-up process using email and password
@@ -42,24 +46,44 @@ export default function SignUp() {
       if (signUpAttempt.status === "complete") {
         // Set the active session
         await setActive({ session: signUpAttempt.createdSessionId });
-        router.replace("/home");
+        showToast.success("Success", "Account created successfully");
+        router.replace("../home");
       } else if (signUpAttempt.status === "missing_requirements") {
-        // Email verification needed
-        router.push({
-          pathname: "/verify-email",
-          params: { email: data.email },
-        });
+        // Log the full response for debugging
+        console.log("Sign up requirements:", JSON.stringify(signUpAttempt, null, 2));
+        
+        // Check if email verification is specifically required
+        const needsEmailVerification = signUpAttempt.verifications?.emailAddress?.status !== "verified";
+        
+        if (needsEmailVerification) {
+          showToast.info("Verification Required", "Please verify your email address");
+          router.push({
+            pathname: "/(auth)/verify-email",
+            params: { email: data.email },
+          });
+        } else {
+          // If no email verification needed, try to complete the sign up
+          try {
+            await signUpAttempt.prepareEmailAddressVerification();
+            await setActive({ session: signUpAttempt.createdSessionId });
+            showToast.success("Success", "Account created successfully");
+            router.replace("../home");
+          } catch (verificationErr) {
+            console.error("Verification error:", verificationErr);
+            throw new Error("Failed to complete sign up process");
+          }
+        }
       } else {
         // User needs to complete additional steps
-        console.error(JSON.stringify(signUpAttempt, null, 2));
+        console.error("Sign up incomplete:", JSON.stringify(signUpAttempt, null, 2));
         throw new Error(`Sign up failed: ${signUpAttempt.status}`);
       }
     } catch (err) {
-      if (err instanceof Error) {
-        throw new Error(err.message || "Failed to sign up");
-      } else {
-        throw new Error("An unexpected error occurred");
-      }
+      console.error("Sign up failed:", err);
+      const errorMsg = err instanceof Error ? 
+        err.message : "Failed to create account. Please try again.";
+      setError(errorMsg);
+      showToast.error("Error", errorMsg);
     }
   };
 
@@ -69,6 +93,8 @@ export default function SignUp() {
         <Text style={styles.title}>Create account</Text>
         <Text style={styles.subtitle}>Sign up to get started</Text>
       </View>
+
+      {error && <ErrorMessage message={error} testID="auth-error" />}
 
       <Controller
         control={control}
@@ -130,7 +156,7 @@ export default function SignUp() {
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>Already have an account?</Text>
-        <Link href="/(auth)/sign-in" style={styles.signInLink}>
+        <Link href="./sign-in" style={styles.signInLink}>
           <Text style={styles.signInText}>Sign in</Text>
         </Link>
       </View>

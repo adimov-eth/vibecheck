@@ -38,7 +38,7 @@ export default function Paywall() {
 
   const { 
     usageStats: usageData,
-    isLoading: usageLoading,
+    loading: usageLoading,
     error: usageError,
   } = useUsage();
 
@@ -206,7 +206,7 @@ export default function Paywall() {
             <View style={localStyles.usageStat}>
               <Text style={localStyles.usageStatLabel}>Current Usage</Text>
               <Text style={localStyles.usageStatValue}>
-                {usageData ? `${usageData.totalMinutes}/${usageData.totalMinutes + usageData.remainingMinutes}` : '0/0'}
+                {usageData ? `${usageData.currentUsage}/${usageData.currentUsage + usageData.remainingConversations}` : '0/0'}
               </Text>
             </View>
             
@@ -214,9 +214,9 @@ export default function Paywall() {
               <Text style={localStyles.usageStatLabel}>Remaining</Text>
               <Text style={[
                 localStyles.usageStatValue,
-                (!usageData?.remainingMinutes) && localStyles.usageStatValueZero
+                (!usageData?.remainingConversations) && localStyles.usageStatValueZero
               ]}>
-                {usageData?.remainingMinutes || 0}
+                {usageData?.remainingConversations || 0}
               </Text>
             </View>
           </View>

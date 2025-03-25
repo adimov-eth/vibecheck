@@ -12,7 +12,7 @@ export default function AuthLayout() {
   
   // Redirect to home if already signed in
   if (isSignedIn) {
-    return <Redirect href="/home" />;
+    return <Redirect href="../home" />;
   }
   
   return <Stack />;

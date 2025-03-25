@@ -8,9 +8,6 @@ interface ConversationResult {
   status: 'processing' | 'completed' | 'error';
   error?: string;
   progress: number;
-  additionalData?: {
-    category?: 'mediator' | 'counselor' | 'dinner' | 'movie';
-  };
 }
 
 export const useConversationResult = (conversationId: string) => {
@@ -18,73 +15,109 @@ export const useConversationResult = (conversationId: string) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  const { 
-    wsMessages, 
-    socket, 
-    connectWebSocket, 
+  const {
+    wsMessages,
+    socket,
+    connectWebSocket,
     subscribeToConversation,
-    clearMessages 
+    unsubscribeFromConversation,
+    clearMessages,
+    clearUploadState,
   } = useStore();
 
-  // Connect to WebSocket and subscribe to conversation updates
   useEffect(() => {
+    let mounted = true;
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    const attemptSubscription = () => {
+      if (socket?.readyState === WebSocket.OPEN && mounted) {
+        subscribeToConversation(conversationId);
+        return true;
+      }
+      return false;
+    };
+
     const setupWebSocket = async () => {
       try {
-        if (!socket) {
+        if (!socket || socket.readyState === WebSocket.CLOSED) {
           await connectWebSocket();
         }
-        subscribeToConversation(conversationId);
+
+        // Initial subscription attempt
+        if (!attemptSubscription() && retryCount < maxRetries) {
+          // Set up retry with exponential backoff
+          const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000);
+          retryCount++;
+          
+          setTimeout(() => {
+            if (mounted && !attemptSubscription() && retryCount < maxRetries) {
+              setupWebSocket();
+            }
+          }, retryDelay);
+        }
       } catch (err) {
-        setError(err instanceof Error ? err : new Error('Failed to connect to WebSocket'));
+        if (mounted) {
+          setError(err instanceof Error ? err : new Error('Failed to connect to WebSocket'));
+          setIsLoading(false);
+        }
       }
     };
 
     setupWebSocket();
 
     return () => {
-      clearMessages();
+      mounted = false;
+      unsubscribeFromConversation(conversationId);
     };
-  }, [conversationId, socket, connectWebSocket, subscribeToConversation, clearMessages]);
+  }, [conversationId, socket, connectWebSocket, subscribeToConversation, unsubscribeFromConversation]);
 
-  // Process WebSocket messages
   useEffect(() => {
     const relevantMessages = wsMessages.filter(
-      msg => msg.payload.conversationId === conversationId
+      (msg) => msg.payload.conversationId === conversationId
     );
 
     if (relevantMessages.length === 0) {
       setData({
         status: 'processing',
-        progress: 0
+        progress: 0,
       });
+      setIsLoading(true);
       return;
     }
 
     const result: ConversationResult = {
       status: 'processing',
-      progress: 0
+      progress: 0,
     };
 
-    // Process messages in order
-    relevantMessages.forEach((msg: WebSocketMessage, index: number) => {
+    relevantMessages.forEach((msg: WebSocketMessage) => {
       switch (msg.type) {
         case 'transcript':
           result.transcript = msg.payload.content;
-          result.progress = Math.min(50, Math.round((index + 1) / relevantMessages.length * 100));
+          result.progress = 50;
           break;
         case 'analysis':
           result.analysis = msg.payload.content;
-          result.progress = Math.min(100, 50 + Math.round((index + 1) / relevantMessages.length * 50));
+          result.progress = 100;
           break;
         case 'error':
           result.status = 'error';
           result.error = msg.payload.error;
           result.progress = 100;
+          clearUploadState(conversationId);
           break;
         case 'status':
-          if (msg.payload.status === 'completed') {
+          if (msg.payload.status === 'conversation_completed') {
             result.status = 'completed';
+            result.analysis = msg.payload.gptResponse;
             result.progress = 100;
+            clearUploadState(conversationId);
+          } else if (msg.payload.status === 'error') {
+            result.status = 'error';
+            result.error = msg.payload.error;
+            result.progress = 100;
+            clearUploadState(conversationId);
           }
           break;
       }
@@ -92,7 +125,15 @@ export const useConversationResult = (conversationId: string) => {
 
     setData(result);
     setIsLoading(false);
-  }, [wsMessages, conversationId]);
+  }, [wsMessages, conversationId, clearUploadState]);
+
+  useEffect(() => {
+    return () => {
+      if (data?.status === 'processing') {
+        clearUploadState(conversationId);
+      }
+    };
+  }, [conversationId, data?.status, clearUploadState]);
 
   const refetch = async () => {
     setIsLoading(true);
@@ -105,6 +146,6 @@ export const useConversationResult = (conversationId: string) => {
     data,
     isLoading,
     error,
-    refetch
+    refetch,
   };
 }; 

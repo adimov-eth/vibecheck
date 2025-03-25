@@ -7,4 +7,4 @@
 import './registerNativeModules';
 
 // Then load the Expo Router entry point
-import 'expo-router/entry'; 
+import 'expo-router/entry';

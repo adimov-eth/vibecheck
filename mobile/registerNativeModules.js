@@ -5,8 +5,8 @@
  */
 
 // Import all modules first
-import { enableScreens } from 'react-native-screens';
 import 'react-native-gesture-handler';
+import { enableScreens } from 'react-native-screens';
 
 // Then enable screens implementation for better performance
 enableScreens();

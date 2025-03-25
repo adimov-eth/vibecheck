@@ -30,7 +30,7 @@ export default function Results() {
   
   // Handle navigation back to home
   const handleGoToHome = () => {
-    router.replace('/home');
+    router.replace('../home');
   };
   
   // If there's no ID, show an error and navigate home
@@ -75,7 +75,9 @@ export default function Results() {
                   ]} 
                 />
               </View>
-              <Text style={styles.progressText}>{result.progress}%</Text>
+              <Text style={[styles.progressText, typography.label2]}>
+                {result.progress}%
+              </Text>
             </View>
           )}
           
@@ -84,7 +86,7 @@ export default function Results() {
               styles.connectionIndicator,
               { backgroundColor: result ? colors.success : colors.warning }
             ]} />
-            <Text style={styles.connectionInfoText}>
+            <Text style={[styles.connectionInfoText, typography.label2]}>
               Using real-time updates
             </Text>
           </View>
@@ -107,6 +109,10 @@ export default function Results() {
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: spacing.xl,
+  },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -118,10 +124,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   errorMessage: {
-    ...typography.body1,
-    color: colors.mediumText,
     marginBottom: spacing.xl,
     textAlign: 'center',
+    color: colors.text.secondary,
   },
   processingContainer: {
     flex: 1,
@@ -135,9 +140,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   progressContainer: {
-    width: '80%',
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    marginTop: spacing.xl,
   },
   progressBackground: {
     width: '100%',
@@ -150,14 +154,13 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   progressText: {
-    ...typography.caption,
     marginTop: spacing.xs,
-    color: colors.mediumText,
+    color: colors.text.secondary,
   },
   connectionInfoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.xl,
+    marginTop: spacing.md,
   },
   connectionIndicator: {
     width: 8,
@@ -166,7 +169,6 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   connectionInfoText: {
-    ...typography.caption,
-    color: colors.mediumText,
+    color: colors.text.secondary,
   },
 });

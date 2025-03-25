@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleProp, StyleSheet, Text, TextInput, TextStyle, View, ViewStyle } from 'react-native';
 
 interface FormFieldProps {
   label?: string;
@@ -16,6 +16,8 @@ interface FormFieldProps {
   helperText?: string;
   onBlur?: () => void;
   testID?: string;
+  inputStyle?: StyleProp<TextStyle>;
+  containerStyle?: StyleProp<ViewStyle>;
 }
 
 export const FormField: React.FC<FormFieldProps> = ({
@@ -33,6 +35,8 @@ export const FormField: React.FC<FormFieldProps> = ({
   helperText,
   onBlur,
   testID,
+  inputStyle,
+  containerStyle,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
 
@@ -45,7 +49,7 @@ export const FormField: React.FC<FormFieldProps> = ({
   const inputId = `input-${label?.toLowerCase().replace(/\s+/g, '-') || Math.random().toString(36).substring(2, 9)}`;
 
   return (
-    <View style={styles.container} testID={testID}>
+    <View style={[styles.container, containerStyle]} testID={testID}>
       {label && (
         <Text 
           style={styles.label}
@@ -62,6 +66,7 @@ export const FormField: React.FC<FormFieldProps> = ({
           isFocused && styles.focusedInput,
           error && styles.errorInput,
           disabled && styles.disabledInput,
+          inputStyle,
         ]}
         value={value}
         onChangeText={onChangeText}

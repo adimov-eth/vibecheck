@@ -1,10 +1,10 @@
-import { type AnalysisResponse } from '@/services/api';
-import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AnalysisResponse } from '../../types/analysis';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-
+import { ErrorView } from './ErrorView';
+import { LoadingView } from './LoadingView';
 
 interface ResultsViewProps {
   isLoading: boolean;
@@ -17,6 +17,25 @@ interface ResultsViewProps {
   testID?: string;
 }
 
+interface RecommendationProps {
+  text: string;
+  index: number;
+  accentColor: string;
+}
+
+const Recommendation: React.FC<RecommendationProps> = ({ text, index, accentColor }) => (
+  <View style={styles.recommendationItem}>
+    <View style={[styles.recommendationBullet, { backgroundColor: accentColor }]}>
+      <Text style={styles.recommendationNumber}>{index + 1}</Text>
+    </View>
+    <Text style={styles.recommendationText}>{text}</Text>
+  </View>
+);
+
+/**
+ * Displays the analysis results of a conversation, including loading state,
+ * errors, and the actual analysis content.
+ */
 export const ResultsView: React.FC<ResultsViewProps> = ({
   isLoading,
   progress,
@@ -29,57 +48,34 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
 }) => {
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer} testID={`${testID}-loading`}>
-        <ActivityIndicator size="large" color={accentColor} />
-        <Text style={styles.loadingText}>Processing your conversation...</Text>
-        <View style={styles.progressContainer}>
-          <View 
-            style={[
-              styles.progressBar, 
-              { 
-                width: `${Math.min(100, Math.max(0, progress))}%`,
-                backgroundColor: accentColor 
-              }
-            ]} 
-          />
-        </View>
-        <Text style={styles.progressText}>{progress}%</Text>
-      </View>
+      <LoadingView
+        progress={progress}
+        accentColor={accentColor}
+        testID={testID}
+      />
     );
   }
 
   if (error) {
     return (
-      <View style={styles.errorContainer} testID={`${testID}-error`}>
-        <Ionicons name="alert-circle-outline" size={64} color="#dc2626" />
-        <Text style={styles.errorTitle}>Error</Text>
-        <Text style={styles.errorMessage}>{error}</Text>
-        {onRetry && (
-          <Button 
-            title="Try Again" 
-            onPress={onRetry} 
-            variant="danger"
-            leftIcon="refresh"
-            style={styles.errorButton}
-          />
-        )}
-      </View>
+      <ErrorView
+        message={error}
+        onRetry={onRetry}
+        testID={testID}
+      />
     );
   }
 
   if (!result) {
     return (
-      <View style={styles.errorContainer} testID={`${testID}-no-result`}>
-        <Ionicons name="document-outline" size={64} color="#64748b" />
-        <Text style={styles.errorTitle}>No Results</Text>
-        <Text style={styles.errorMessage}>No analysis results available.</Text>
-        <Button 
-          title="New Conversation" 
-          onPress={onNewConversation}
-          variant="primary"
-          style={styles.errorButton}
-        />
-      </View>
+      <ErrorView
+        message="No analysis results available."
+        title="No Results"
+        icon="document-outline"
+        iconColor="#64748b"
+        onNewConversation={onNewConversation}
+        testID={testID}
+      />
     );
   }
 
@@ -98,12 +94,12 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
         <Card style={styles.recommendationsCard}>
           <Text style={styles.sectionTitle}>Recommendations</Text>
           {result.recommendations.map((recommendation, index) => (
-            <View key={index} style={styles.recommendationItem}>
-              <View style={[styles.recommendationBullet, { backgroundColor: accentColor }]}>
-                <Text style={styles.recommendationNumber}>{index + 1}</Text>
-              </View>
-              <Text style={styles.recommendationText}>{recommendation}</Text>
-            </View>
+            <Recommendation
+              key={index}
+              text={recommendation}
+              index={index}
+              accentColor={accentColor}
+            />
           ))}
         </Card>
       )}
@@ -126,58 +122,6 @@ const styles = StyleSheet.create({
   contentContainer: {
     padding: 16,
     paddingBottom: 32,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  loadingText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#0f172a',
-    marginTop: 16,
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  progressContainer: {
-    width: '80%',
-    height: 8,
-    backgroundColor: '#e2e8f0',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressBar: {
-    height: '100%',
-  },
-  progressText: {
-    fontSize: 14,
-    color: '#64748b',
-    marginTop: 8,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  errorTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  errorMessage: {
-    fontSize: 16,
-    color: '#64748b',
-    textAlign: 'center',
-    marginBottom: 24,
-    maxWidth: '80%',
-  },
-  errorButton: {
-    marginTop: 16,
   },
   summaryCard: {
     marginBottom: 24,

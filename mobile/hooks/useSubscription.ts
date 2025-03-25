@@ -21,7 +21,7 @@ export const useSubscription = () => {
   }, [initializeStore, cleanupStore]);
 
   return {
-    isSubscribed: subscriptionStatus?.active ?? false,
+    isSubscribed: subscriptionStatus?.isActive ?? false,
     subscriptionProducts,
     purchase,
     restore,

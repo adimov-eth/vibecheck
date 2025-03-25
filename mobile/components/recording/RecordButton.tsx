@@ -1,142 +1,109 @@
+import { colors } from '@/constants/styles';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import Reanimated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withRepeat,
+    withSpring,
+    withTiming,
+} from 'react-native-reanimated';
+
+const ReanimatedView = Reanimated.createAnimatedComponent(View);
 
 interface RecordButtonProps {
   isRecording: boolean;
   onPress: () => void;
-  size?: number;
-  disabled?: boolean;
-  testID?: string;
 }
 
-export const RecordButton: React.FC<RecordButtonProps> = ({
-  isRecording,
-  onPress,
-  size = 80,
-  disabled = false,
-  testID,
-}) => {
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+export function RecordButton({ isRecording, onPress }: RecordButtonProps) {
+  const scale = useSharedValue(1);
+  const glowOpacity = useSharedValue(0);
+  const glowScale = useSharedValue(1);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (isRecording) {
-      // Start pulse animation
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.2,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-
-      // Button scale animation when recording
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(scaleAnim, {
-            toValue: 1.05,
-            duration: 800,
-            useNativeDriver: true,
-          }),
-          Animated.timing(scaleAnim, {
-            toValue: 1,
-            duration: 800,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
+      glowOpacity.value = withRepeat(
+        withTiming(0.5, { duration: 1000 }),
+        -1,
+        true
+      );
+      glowScale.value = withRepeat(
+        withTiming(1.3, { duration: 1000 }),
+        -1,
+        true
+      );
     } else {
-      // Reset animations
-      pulseAnim.setValue(1);
-      scaleAnim.setValue(1);
+      glowOpacity.value = withSpring(0);
+      glowScale.value = withSpring(1);
     }
+  }, [isRecording]);
 
-    return () => {
-      pulseAnim.stopAnimation();
-      scaleAnim.stopAnimation();
-    };
-  }, [isRecording, pulseAnim, scaleAnim]);
+  const buttonStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
 
-  const buttonColor = isRecording 
-    ? '#dc2626' 
-    : disabled 
-      ? '#d1d5db' 
-      : '#2563eb';
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: glowOpacity.value,
+    transform: [{ scale: glowScale.value }],
+  }));
+
+  const handlePressIn = () => {
+    scale.value = withSpring(0.95);
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1);
+  };
 
   return (
-    <View style={styles.container} testID={testID}>
-      {isRecording && (
-        <Animated.View
-          style={[
-            styles.pulse,
-            {
-              width: size * 1.4,
-              height: size * 1.4,
-              borderRadius: (size * 1.4) / 2,
-              transform: [{ scale: pulseAnim }],
-            },
-          ]}
-        />
-      )}
-      
-      <Animated.View
-        style={{
-          transform: [{ scale: scaleAnim }],
-        }}
+    <View style={styles.container}>
+      <ReanimatedView style={[styles.glow, glowStyle]} />
+      <Pressable
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
       >
-        <TouchableOpacity
-          style={[
-            styles.button,
-            {
-              width: size,
-              height: size,
-              borderRadius: size / 2,
-              backgroundColor: buttonColor,
-            },
-          ]}
-          onPress={onPress}
-          disabled={disabled}
-          activeOpacity={0.8}
-          accessibilityLabel={isRecording ? "Stop recording" : "Start recording"}
-          accessibilityRole="button"
-          accessibilityState={{ disabled }}
-        >
+        <ReanimatedView style={[styles.button, buttonStyle]}>
           <Ionicons
-            name={isRecording ? "square" : "mic"}
-            size={isRecording ? size / 3 : size / 2}
-            color="#ffffff"
+            name={isRecording ? 'stop' : 'mic'}
+            size={24}
+            color="white"
           />
-        </TouchableOpacity>
-      </Animated.View>
+        </ReanimatedView>
+      </Pressable>
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
-  },
-  pulse: {
-    position: 'absolute',
-    backgroundColor: 'rgba(220, 38, 38, 0.2)',
   },
   button: {
-    justifyContent: 'center',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.primary,
     alignItems: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
+    justifyContent: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+  },
+  glow: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.primary,
+    opacity: 0,
   },
 }); 

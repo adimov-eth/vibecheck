@@ -42,23 +42,25 @@ export const PasswordInput: React.FC<PasswordInputProps> = ({
         disabled={disabled}
         helperText={helperText}
         onBlur={onBlur}
+        inputStyle={styles.input}
       />
-      <TouchableOpacity 
-        style={[
-          styles.toggleButton,
-          { top: label ? 40 : 10 }
-        ]} 
-        onPress={toggleVisibility}
-        disabled={disabled}
-        accessibilityLabel={isVisible ? "Hide password" : "Show password"}
-        accessibilityRole="button"
-      >
-        <Ionicons 
-          name={isVisible ? "eye-off-outline" : "eye-outline"} 
-          size={20} 
-          color={disabled ? "#94a3b8" : "#64748b"} 
-        />
-      </TouchableOpacity>
+      <View style={styles.iconWrapper}>
+        <TouchableOpacity 
+          style={styles.toggleButton}
+          onPress={toggleVisibility}
+          disabled={disabled}
+          accessibilityLabel={isVisible ? "Hide password" : "Show password"}
+          accessibilityRole="button"
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons 
+            name={isVisible ? "eye-off" : "eye"}
+            size={22}
+            color={disabled ? "#94a3b8" : "#6b7280"}
+            style={styles.icon}
+          />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
@@ -68,9 +70,27 @@ const styles = StyleSheet.create({
     position: 'relative',
     width: '100%',
   },
-  toggleButton: {
+  input: {
+    paddingRight: 48,
+  },
+  iconWrapper: {
     position: 'absolute',
-    right: 12,
-    padding: 4,
+    top: 0,
+    right: 6,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    // Account for label height when present
+    marginTop: 8,
+  },
+  toggleButton: {
+    height: 42,
+    width: 42,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 21,
+  },
+  icon: {
+    opacity: 0.6,
   },
 }); 

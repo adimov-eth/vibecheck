@@ -9,7 +9,7 @@ import { colors, spacing, typography } from '@/constants/styles';
 import { useRecordingFlow } from '@/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 interface Mode {
@@ -24,12 +24,7 @@ export default function Recording() {
   const router = useRouter();
 
   // Mode details (could be fetched from a store or API)
-  const [mode, setMode] = useState<Mode>({
-    id: typeof id === 'string' ? id : '',
-    title: 'Recording',
-    description: 'Record your conversation',
-    color: '#3B71FE',
-  });
+  const [mode, setMode] = useState<Mode>(() => getModeDetails(typeof id === 'string' ? id : ''));
 
   // Recording flow hook
   const {
@@ -44,16 +39,14 @@ export default function Recording() {
     uploadProgress,
   } = useRecordingFlow({
     modeId: id as string,
-    onComplete: (conversationId) => router.replace(`/results/${conversationId}`),
+    onComplete: useCallback((conversationId) => router.replace(`../results/${conversationId}`), [router]),
   });
 
   // Load mode details
+  const modeDetails = useMemo(() => getModeDetails(id as string), [id]);
   useEffect(() => {
-    if (id) {
-      const modeDetails = getModeDetails(id as string);
-      setMode(modeDetails);
-    }
-  }, [id]);
+    setMode(modeDetails);
+  }, [modeDetails]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -137,7 +130,6 @@ export default function Recording() {
               <RecordButton
                 isRecording={isRecording}
                 onPress={handleToggleRecording}
-                disabled={isUploading}
               />
               <Text style={styles.recordingInstructions}>
                 {isRecording ? 'Recording... Tap to stop' : 'Tap to start recording'}
