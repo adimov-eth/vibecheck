@@ -31,14 +31,13 @@ export const createConversation = async ({
       const userExists = userExistsResult[0]?.exists_flag === 1;
       
       if (!userExists) {
-        // Create the user record instead of throwing an error
-        // We defer to the auth middleware to provide complete user details
-        // This is a fallback to ensure we can create the conversation
-        await run(
-          'INSERT INTO users (id) VALUES (?)',
-          [userId]
-        );
-        logger.info(`Created minimal user record for ${userId} during conversation creation`);
+        // Cannot create a user record here because email is required
+        // Instead, redirect to the middleware approach
+        logger.warn(`User ${userId} not found in database but exists in Clerk auth`);
+        throw new Error(`User ${userId} not found in database`);
+        
+        // Note: The ensureUser middleware should catch this and create the user
+        // with proper email and name from the auth object before this service is called
       }
       
       const conversations = await query<Conversation>(
