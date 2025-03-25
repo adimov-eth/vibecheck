@@ -15,9 +15,10 @@ export const useConversationResult = (conversationId: string) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   
-  // Use refs to track subscription status
+  // Use refs to track subscription status and component mount state
   const isSubscribed = useRef(false);
   const lastAttemptTime = useRef(0);
+  const mounted = useRef(true);
 
   const {
     wsMessages,
@@ -30,12 +31,12 @@ export const useConversationResult = (conversationId: string) => {
   } = useStore();
 
   useEffect(() => {
-    let mounted = true;
+    mounted.current = true;
     const checkInterval = useRef<NodeJS.Timeout | null>(null);
 
     // Attempt to subscribe and return success status
     const attemptSubscription = () => {
-      if (!mounted) return false;
+      if (!mounted.current) return false;
       
       // Only log in development
       if (__DEV__) {
@@ -111,7 +112,7 @@ export const useConversationResult = (conversationId: string) => {
         startConnectionHealthCheck();
       } catch (err) {
         console.error('WebSocket initialization error:', err);
-        if (mounted) {
+        if (mounted.current) {
           setError(err instanceof Error ? err : new Error('Failed to connect to WebSocket'));
           setIsLoading(false);
         }
@@ -124,7 +125,7 @@ export const useConversationResult = (conversationId: string) => {
       if (__DEV__) {
         console.log('Cleaning up WebSocket for conversation:', conversationId);
       }
-      mounted = false;
+      mounted.current = false;
       isSubscribed.current = false;
       
       if (checkInterval.current) {
@@ -136,41 +137,51 @@ export const useConversationResult = (conversationId: string) => {
   }, [conversationId, socket, connectWebSocket, subscribeToConversation, unsubscribeFromConversation]);
 
   useEffect(() => {
+    if (!mounted.current) return;
+    
     // Only log in development mode
     if (__DEV__) {
       console.log('Processing messages for conversation:', conversationId);
     }
     
-    // Filter messages for this conversation, but be more flexible with conversationId location
-    const relevantMessages = wsMessages.filter(
-      (msg) => {
-        // Handle different message types according to their specific structure
-        if (msg.type === 'transcript' || msg.type === 'analysis' || msg.type === 'status') {
-          return msg.payload.conversationId === conversationId;
-        } else if (msg.type === 'audio') {
-          return msg.payload.conversationId === conversationId;
-        } else if (msg.type === 'error') {
-          // Include error messages that might be related to this conversation
-          return !msg.payload.conversationId || msg.payload.conversationId === conversationId;
+    try {
+      // Filter messages for this conversation, but be more flexible with conversationId location
+      const relevantMessages = wsMessages.filter(
+        (msg) => {
+          try {
+            // Handle different message types according to their specific structure
+            if (msg.type === 'transcript' || msg.type === 'analysis' || msg.type === 'status') {
+              return msg.payload.conversationId === conversationId;
+            } else if (msg.type === 'audio') {
+              return msg.payload.conversationId === conversationId;
+            } else if (msg.type === 'error') {
+              // Include error messages that might be related to this conversation
+              return !msg.payload.conversationId || msg.payload.conversationId === conversationId;
+            }
+            
+            // Filter out connection, subscription and pong messages
+            return false;
+          } catch (e) {
+            console.error('Error filtering message:', e);
+            return false;
+          }
         }
-        
-        // Filter out connection, subscription and pong messages
-        return false;
+      );
+    
+      if (__DEV__) {
+        console.log(`Found ${relevantMessages.length} relevant messages for conversation ${conversationId}`);
       }
-    );
 
-    if (__DEV__) {
-      console.log(`Found ${relevantMessages.length} relevant messages for conversation ${conversationId}`);
-    }
-
-    if (relevantMessages.length === 0) {
-      setData({
-        status: 'processing',
-        progress: 0,
-      });
-      setIsLoading(true);
-      return;
-    }
+      if (relevantMessages.length === 0) {
+        if (mounted.current) {
+          setData({
+            status: 'processing',
+            progress: 0,
+          });
+          setIsLoading(true);
+        }
+        return;
+      }
 
     const result: ConversationResult = {
       status: 'processing',
@@ -249,8 +260,17 @@ export const useConversationResult = (conversationId: string) => {
       }
     });
 
-    setData(result);
-    setIsLoading(false);
+      if (mounted.current) {
+        setData(result);
+        setIsLoading(false);
+      }
+    } catch (err) {
+      console.error('Error processing WebSocket messages:', err);
+      if (mounted.current) {
+        setError(err instanceof Error ? err : new Error('Error processing messages'));
+        setIsLoading(false);
+      }
+    }
   }, [wsMessages, conversationId, clearUploadState]);
 
   useEffect(() => {

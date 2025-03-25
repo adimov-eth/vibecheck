@@ -14,14 +14,30 @@ export default function Results() {
   const router = useRouter();
   const conversationId = id as string;
 
+  // Validate conversation ID
+  if (!conversationId) {
+    return (
+      <Container withSafeArea>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>Missing Conversation ID</Text>
+          <Text style={styles.errorMessage}>Unable to load conversation results</Text>
+          <Button 
+            title="Go Home" 
+            onPress={() => router.replace('../home')}
+            variant="primary"
+          />
+        </View>
+      </Container>
+    );
+  }
+
   // Get conversation details and results
   const { conversation, isLoading: conversationLoading } = useConversation(conversationId);
-  const { 
-    data: result, 
-    isLoading, 
-    error, 
-    refetch 
-  } = useConversationResult(conversationId);
+  const resultHook = useConversationResult(conversationId);
+  const result = resultHook?.data;
+  const isLoading = resultHook?.isLoading || false;
+  const error = resultHook?.error;
+  const refetch = resultHook?.refetch;
 
   // Determine the appropriate accent color based on conversation mode
   const accentColor = conversation?.mode === 'mediator' ? '#58BD7D' : 
@@ -33,22 +49,7 @@ export default function Results() {
     router.replace('../home');
   };
   
-  // If there's no ID, show an error and navigate home
-  if (!conversationId) {
-    return (
-      <Container withSafeArea>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorTitle}>Missing Conversation ID</Text>
-          <Text style={styles.errorMessage}>Unable to load conversation results</Text>
-          <Button 
-            title="Go Home" 
-            onPress={handleGoToHome}
-            variant="primary"
-          />
-        </View>
-      </Container>
-    );
-  }
+  // This block is now placed earlier in the component
 
   return (
     <Container withSafeArea>
@@ -58,7 +59,26 @@ export default function Results() {
         onBackPress={handleGoToHome} 
       />
       
-      {result?.status === 'processing' && (
+      {/* This section is now handled in the conditional rendering above */}
+      
+      {!result || result.status !== 'processing' ? (
+        <View style={{ flex: 1 }}>
+          <ResultsView
+            isLoading={isLoading || conversationLoading}
+            result={result?.status === 'completed' ? {
+              status: 'completed',
+              summary: result.analysis || '',
+              recommendations: [],
+              progress: 100
+            } : null}
+            error={error?.message || result?.error || null}
+            accentColor={accentColor}
+            onNewConversation={handleGoToHome}
+            onRetry={() => refetch && refetch()}
+            progress={result?.progress || 0}
+          />
+        </View>
+      ) : (
         <View style={styles.processingContainer}>
           <ActivityIndicator size="large" color={accentColor} />
           <Text style={styles.processingText}>
@@ -80,35 +100,6 @@ export default function Results() {
               </Text>
             </View>
           )}
-          
-          <View style={styles.connectionInfoContainer}>
-            <View style={[
-              styles.connectionIndicator,
-              { backgroundColor: result ? colors.success : colors.warning }
-            ]} />
-            <Text style={[styles.connectionInfoText, typography.label2]}>
-              Using real-time updates
-            </Text>
-          </View>
-        </View>
-      )}
-      
-      {result?.status !== 'processing' && (
-        <View style={{ flex: 1 }}>
-          <ResultsView
-            isLoading={isLoading || conversationLoading}
-            result={result?.status === 'completed' ? {
-              status: 'completed',
-              summary: result.analysis || '',
-              recommendations: [],
-              progress: 100
-            } : null}
-            error={error?.message || result?.error || null}
-            accentColor={accentColor}
-            onNewConversation={handleGoToHome}
-            onRetry={() => refetch()}
-            progress={result?.progress || 0}
-          />
         </View>
       )}
     </Container>
