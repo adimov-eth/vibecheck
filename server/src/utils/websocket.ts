@@ -48,16 +48,40 @@ export class WebSocketManager {
 
       ws.on('message', (message) => {
         try {
-          const data = JSON.parse(message.toString());
+          const rawMessage = message.toString();
+          logger.debug(`Received message from client ${userId}: ${rawMessage}`);
+          
+          const data = JSON.parse(rawMessage);
+          
           if (data.type === 'subscribe' && data.topic) {
             ws.subscribedTopics.add(data.topic);
-            logger.debug(`Client ${userId} subscribed to ${data.topic}`);
+            logger.info(`Client ${userId} subscribed to ${data.topic}`);
+            
+            // Send confirmation of subscription to client
+            ws.send(JSON.stringify({
+              type: 'subscription_confirmed',
+              timestamp: new Date().toISOString(),
+              payload: { topic: data.topic }
+            }));
+            
+            // Log all current subscriptions for this client
+            logger.debug(`Client ${userId} subscriptions: ${Array.from(ws.subscribedTopics).join(', ')}`);
           } else if (data.type === 'unsubscribe' && data.topic) {
             ws.subscribedTopics.delete(data.topic);
-            logger.debug(`Client ${userId} unsubscribed from ${data.topic}`);
+            logger.info(`Client ${userId} unsubscribed from ${data.topic}`);
+            
+            // Send confirmation of unsubscription
+            ws.send(JSON.stringify({
+              type: 'unsubscription_confirmed',
+              timestamp: new Date().toISOString(),
+              payload: { topic: data.topic }
+            }));
+          } else {
+            logger.debug(`Received unknown message type: ${data.type}`);
           }
         } catch (error) {
           logger.error(`Error processing message: ${error}`);
+          logger.error(`Raw message content: ${message.toString()}`);
         }
       });
 
@@ -98,15 +122,33 @@ export class WebSocketManager {
   }
 
   public sendToSubscribedClients(userId: string, topic: string, data: unknown): void {
-    console.log('sendToSubscribedClients', userId, topic, data);
     const userClients = this.clients.get(userId);
-    if (!userClients) return;
+    
+    logger.debug(`Attempting to send message to topic ${topic} for user ${userId}`);
+    
+    if (!userClients || userClients.size === 0) {
+      logger.warn(`No connected clients found for user ${userId}`);
+      return;
+    }
+    
     const message = JSON.stringify(data);
+    let sentCount = 0;
+    
     userClients.forEach((client) => {
-      if (client.subscribedTopics.has(topic) && client.readyState === WebSocket.OPEN) {
-        client.send(message);
+      if (client.readyState === WebSocket.OPEN) {
+        if (client.subscribedTopics.has(topic)) {
+          client.send(message);
+          sentCount++;
+          logger.debug(`Message sent to client subscribed to ${topic}`);
+        } else {
+          logger.debug(`Client is connected but not subscribed to ${topic}. Subscribed topics: ${Array.from(client.subscribedTopics).join(', ')}`);
+        }
+      } else {
+        logger.debug(`Client for user ${userId} is not in OPEN state. Current state: ${client.readyState}`);
       }
     });
+    
+    logger.debug(`Message sent to ${sentCount}/${userClients.size} clients for topic ${topic}`);
   }
 
   public broadcast(data: unknown): void {

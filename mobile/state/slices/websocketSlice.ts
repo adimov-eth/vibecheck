@@ -153,13 +153,16 @@ export const createWebSocketSlice: StateCreator<
 
       ws.onmessage = (event) => {
         try {
-          console.log('event:', event);
+          console.log('WebSocket received raw message:', event.data);
           const message = JSON.parse(event.data) as WebSocketMessage;
+          console.log('WebSocket parsed message:', message);
+          
           set((state) => {
             state.wsMessages = [...state.wsMessages.slice(-99), message];
           });
         } catch (error) {
           console.error('Failed to parse WebSocket message:', error);
+          console.error('Raw message data:', event.data);
         }
       };
 

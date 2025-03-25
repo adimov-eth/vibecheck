@@ -52,11 +52,42 @@ export const sendConversationNotification = (
   payload?: Record<string, unknown>
 ): void => {
   const topic = `conversation:${conversationId}`;
-  websocketManager.sendToSubscribedClients(userId, topic, {
-    type: 'status',
-    timestamp: new Date().toISOString(),
-    payload: { conversationId, status, ...payload },
-  });
+  
+  // For 'conversation_completed', ensure we're using a consistent message format
+  // that the client can easily parse
+  if (status === 'conversation_completed') {
+    websocketManager.sendToSubscribedClients(userId, topic, {
+      type: 'status',
+      timestamp: new Date().toISOString(),
+      payload: { 
+        conversationId, 
+        status, 
+        // Make sure gptResponse is directly accessible in the payload
+        gptResponse: payload?.gptResponse || null,
+        ...payload 
+      },
+    });
+    
+    // Also send an explicit analysis message for better client compatibility
+    if (payload?.gptResponse) {
+      websocketManager.sendToSubscribedClients(userId, topic, {
+        type: 'analysis',
+        timestamp: new Date().toISOString(),
+        payload: { 
+          conversationId, 
+          content: payload.gptResponse as string 
+        },
+      });
+    }
+  } else {
+    websocketManager.sendToSubscribedClients(userId, topic, {
+      type: 'status',
+      timestamp: new Date().toISOString(),
+      payload: { conversationId, status, ...payload },
+    });
+  }
+
+  logger.debug(`Sent conversation notification ${status} for ${conversationId} to user ${userId}`);
 };
 
 export const sendAudioNotification = (

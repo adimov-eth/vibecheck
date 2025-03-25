@@ -28,10 +28,12 @@ export const useConversationResult = (conversationId: string) => {
   useEffect(() => {
     let mounted = true;
     let retryCount = 0;
-    const maxRetries = 3;
+    const maxRetries = 5;
 
     const attemptSubscription = () => {
+      console.log('Attempting to subscribe to conversation:', conversationId, 'WebSocket state:', socket?.readyState);
       if (socket?.readyState === WebSocket.OPEN && mounted) {
+        console.log('Subscribing to conversation:', conversationId);
         subscribeToConversation(conversationId);
         return true;
       }
@@ -40,23 +42,45 @@ export const useConversationResult = (conversationId: string) => {
 
     const setupWebSocket = async () => {
       try {
-        if (!socket || socket.readyState === WebSocket.CLOSED) {
+        console.log('Setting up WebSocket for conversation:', conversationId);
+        
+        if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
+          console.log('WebSocket not connected, connecting now...');
           await connectWebSocket();
+          
+          // Wait a moment after connection before subscribing
+          setTimeout(() => {
+            if (mounted) {
+              attemptSubscription();
+            }
+          }, 500);
+        } else {
+          // Initial subscription attempt
+          attemptSubscription();
         }
 
-        // Initial subscription attempt
-        if (!attemptSubscription() && retryCount < maxRetries) {
-          // Set up retry with exponential backoff
-          const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000);
-          retryCount++;
+        // Set up retry mechanism for subscription
+        const retrySubscription = () => {
+          if (!mounted || retryCount >= maxRetries) return;
           
-          setTimeout(() => {
-            if (mounted && !attemptSubscription() && retryCount < maxRetries) {
-              setupWebSocket();
-            }
-          }, retryDelay);
-        }
+          // Only retry if not already subscribed
+          if (!attemptSubscription()) {
+            const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000);
+            retryCount++;
+            
+            console.log(`Retry ${retryCount}/${maxRetries} for conversation ${conversationId} in ${retryDelay}ms`);
+            
+            setTimeout(() => {
+              retrySubscription();
+            }, retryDelay);
+          }
+        };
+
+        // Start retry sequence after a short delay
+        setTimeout(retrySubscription, 1000);
+        
       } catch (err) {
+        console.error('WebSocket subscription error:', err);
         if (mounted) {
           setError(err instanceof Error ? err : new Error('Failed to connect to WebSocket'));
           setIsLoading(false);
@@ -67,15 +91,23 @@ export const useConversationResult = (conversationId: string) => {
     setupWebSocket();
 
     return () => {
+      console.log('Unsubscribing from conversation:', conversationId);
       mounted = false;
       unsubscribeFromConversation(conversationId);
     };
   }, [conversationId, socket, connectWebSocket, subscribeToConversation, unsubscribeFromConversation]);
 
   useEffect(() => {
+    // Log all WebSocket messages for debugging
+    console.log('All WebSocket messages:', wsMessages);
+    
+    // Filter messages for this conversation, but be more flexible with conversationId location
     const relevantMessages = wsMessages.filter(
-      (msg) => msg.payload.conversationId === conversationId
+      (msg) => (msg.payload.conversationId === conversationId) || 
+               (msg.payload.conversation && msg.payload.conversation.id === conversationId)
     );
+
+    console.log('Relevant messages for conversation:', conversationId, relevantMessages);
 
     if (relevantMessages.length === 0) {
       setData({
@@ -92,6 +124,7 @@ export const useConversationResult = (conversationId: string) => {
     };
 
     relevantMessages.forEach((msg: WebSocketMessage) => {
+      console.log('Processing message:', msg);
       switch (msg.type) {
         case 'transcript':
           result.transcript = msg.payload.content;
@@ -108,9 +141,19 @@ export const useConversationResult = (conversationId: string) => {
           clearUploadState(conversationId);
           break;
         case 'status':
-          if (msg.payload.status === 'conversation_completed') {
+          // More flexible handling of status messages
+          if (msg.payload.status === 'conversation_completed' || msg.payload.status === 'completed') {
             result.status = 'completed';
-            result.analysis = msg.payload.gptResponse;
+            
+            // Check different possible locations for the gptResponse
+            if (msg.payload.gptResponse) {
+              result.analysis = msg.payload.gptResponse;
+            } else if (msg.payload.conversation && msg.payload.conversation.gptResponse) {
+              result.analysis = msg.payload.conversation.gptResponse;
+            } else if (msg.payload.content) {
+              result.analysis = msg.payload.content;
+            }
+            
             result.progress = 100;
             clearUploadState(conversationId);
           } else if (msg.payload.status === 'error') {
@@ -118,6 +161,12 @@ export const useConversationResult = (conversationId: string) => {
             result.error = msg.payload.error;
             result.progress = 100;
             clearUploadState(conversationId);
+          }
+          break;
+        case 'audio':
+          // Handle audio notifications
+          if (msg.payload.status === 'transcribed') {
+            result.progress = Math.max(result.progress, 40);
           }
           break;
       }
