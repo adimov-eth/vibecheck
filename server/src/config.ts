@@ -1,9 +1,10 @@
-console.log('process.env.CLERK_SECRET_KEY: ', process.env.CLERK_SECRET_KEY);
 export const config = {
   port: Number(process.env.PORT) || 3000,
   clerkSecretKey: process.env.CLERK_SECRET_KEY || '',
+  clerkWebhookSecret: process.env.CLERK_WEBHOOK_SECRET || '',
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   appleSharedSecret: process.env.APPLE_SHARED_SECRET || '',
+  nodeEnv: process.env.NODE_ENV || 'development',
   redis: {
     host: process.env.REDIS_HOST || 'localhost',
     port: Number(process.env.REDIS_PORT) || 6379,
@@ -36,3 +37,7 @@ export const config = {
   enableMaintenance: process.env.ENABLE_MAINTENANCE !== 'false',
   maintenanceHour: Number(process.env.MAINTENANCE_HOUR) || 3, // 3 AM
 };
+
+// Log Clerk secret key presence for debugging (avoid logging the actual value in production)
+console.log('Clerk secret key present:', !!process.env.CLERK_SECRET_KEY);
+console.log('Clerk webhook secret present:', !!process.env.CLERK_WEBHOOK_SECRET);

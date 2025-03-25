@@ -3,9 +3,9 @@ import { Container } from '@/components/layout/Container';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { colors, spacing, typography } from '@/constants/styles';
-import { useUsage } from '@/hooks/useApi';
 import { useSubscription } from '@/hooks/useSubscription';
-import { SUBSCRIPTION_SKUS } from '@/types/subscription';
+import { useUsage } from '@/hooks/useUsage';
+import { SUBSCRIPTION_SKUS } from '@/state/slices/subscriptionSlice';
 import { Ionicons } from '@expo/vector-icons';
 import type { Ionicons as IoniconsType } from '@expo/vector-icons/build/Icons';
 import { useRouter } from 'expo-router';
@@ -27,7 +27,6 @@ export default function Paywall() {
   const [isRestoring, setIsRestoring] = useState(false);
   const [purchaseSuccess, setPurchaseSuccess] = useState(false);
 
-  // Use React Query hooks for data fetching
   const { 
     isSubscribed,
     subscriptionProducts,
@@ -38,7 +37,7 @@ export default function Paywall() {
   } = useSubscription();
 
   const { 
-    usageData,
+    usageStats: usageData,
     isLoading: usageLoading,
     error: usageError,
   } = useUsage();
@@ -207,7 +206,7 @@ export default function Paywall() {
             <View style={localStyles.usageStat}>
               <Text style={localStyles.usageStatLabel}>Current Usage</Text>
               <Text style={localStyles.usageStatValue}>
-                {usageData ? `${usageData.limit - usageData.remainingConversations}/${usageData.limit}` : '0/0'}
+                {usageData ? `${usageData.totalMinutes}/${usageData.totalMinutes + usageData.remainingMinutes}` : '0/0'}
               </Text>
             </View>
             
@@ -215,9 +214,9 @@ export default function Paywall() {
               <Text style={localStyles.usageStatLabel}>Remaining</Text>
               <Text style={[
                 localStyles.usageStatValue,
-                (!usageData?.remainingConversations) && localStyles.usageStatValueZero
+                (!usageData?.remainingMinutes) && localStyles.usageStatValueZero
               ]}>
-                {usageData?.remainingConversations || 0}
+                {usageData?.remainingMinutes || 0}
               </Text>
             </View>
           </View>

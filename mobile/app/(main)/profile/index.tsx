@@ -1,28 +1,42 @@
-
 import { AppBar } from '@/components/layout/AppBar';
 import { Button } from '@/components/ui/Button';
 import { colors, layout, spacing, typography } from '@/constants/styles';
-import { useSubscriptionStore, useUsageStore } from '@/hooks/useTypedStore';
+import useStore from '@/state';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function Profile() {
   const router = useRouter();
   const { user } = useUser();
   const { signOut } = useAuth();
-  const { isSubscribed, subscriptionPlan, expiryDate } = useSubscriptionStore();
-  const { remainingConversations, usageLimit, currentUsage, resetDate } = useUsageStore();
+  const store = useStore();
+
+  useEffect(() => {
+    store.checkSubscriptionStatus().catch(() => {});
+    store.getUsageStats().catch(() => {});
+  }, [store]);
 
   const handleBackPress = () => router.back();
   const handleSignOut = async () => await signOut();
   const navigateToUpdatePassword = () => router.push('/profile/update-password');
   const navigateToPaywall = () => router.push('/paywall');
 
+  const isSubscribed = store.subscriptionStatus?.active ?? false;
+  const subscriptionPlan = store.subscriptionStatus?.plan ?? 'none';
+  const expiryDate = store.subscriptionStatus?.expiresAt;
+  const remainingConversations = store.usageStats?.remainingMinutes ?? 0;
+  const currentUsage = store.usageStats?.totalMinutes || 0;
+  const usageLimit = store.usageStats ? 
+    (store.usageStats.totalMinutes + store.usageStats.remainingMinutes) : 0;
+  
+  // Calculate reset date as 30 days from subscription start or last reset
   const getFormattedResetDate = () => {
-    if (!resetDate) return 'Unknown';
-    return new Date(resetDate).toLocaleDateString();
+    if (!expiryDate) return 'Unknown';
+    const resetDate = new Date(expiryDate);
+    resetDate.setDate(resetDate.getDate() - 30); // Show next reset date
+    return resetDate.toLocaleDateString();
   };
 
   return (

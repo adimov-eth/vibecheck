@@ -1,59 +1,60 @@
-import { ErrorMessage } from "@/components/feedback/ErrorMessage";
 import { FormField } from "@/components/forms/FormField";
 import { PasswordInput } from "@/components/forms/PasswordInput";
 import { Container } from "@/components/layout/Container";
 import { Button } from "@/components/ui/Button";
 import { colors, spacing, typography } from "@/constants/styles";
-import { useForm } from "@/hooks/useForm";
 import { signInSchema, type SignInFormData } from "@/validations/auth";
 import { useSignIn } from "@clerk/clerk-expo";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { Link, useRouter } from "expo-router";
 import React from "react";
+import { Controller, SubmitHandler, useForm } from "react-hook-form";
 import { StyleSheet, Text, View } from "react-native";
 
 export default function SignIn() {
   const router = useRouter();
-  const { signIn, setActive } = useSignIn();
+  const { signIn, setActive, isLoaded } = useSignIn();
 
   const {
-    values,
-    errors,
-    isLoading,
-    generalError,
-    updateField,
+    control,
     handleSubmit,
+    formState: { errors, isSubmitting },
   } = useForm<SignInFormData>({
-    initialValues: {
+    resolver: zodResolver(signInSchema),
+    defaultValues: {
       email: "",
       password: "",
     },
-    validationSchema: signInSchema,
-    onSubmit: async (values) => {
-      if (!signIn) {
-        throw new Error("Sign in not available");
-      }
-
-      try {
-        // Attempt to sign in
-        const result = await signIn.create({
-          identifier: values.email,
-          password: values.password,
-        });
-
-        // Handle sign in response
-        if (result.status === "complete") {
-          // Set the active session
-          await setActive({ session: result.createdSessionId });
-          router.replace("/home");
-        } else {
-          throw new Error(`Sign in failed: ${result.status}`);
-        }
-      } catch (err) {
-        const error = err as Error;
-        throw new Error(error.message || "Failed to sign in");
-      }
-    },
   });
+
+  const onSubmit: SubmitHandler<SignInFormData> = async (data) => {
+    if (!isLoaded || !signIn) return;
+
+    try {
+      // Start the sign-in process using email and password
+      const signInAttempt = await signIn.create({
+        identifier: data.email,
+        password: data.password,
+      });
+
+      // Handle sign in response
+      if (signInAttempt.status === "complete") {
+        // Set the active session
+        await setActive({ session: signInAttempt.createdSessionId });
+        router.replace("/home");
+      } else {
+        // User needs to complete additional steps
+        console.error(JSON.stringify(signInAttempt, null, 2));
+        throw new Error(`Sign in failed: ${signInAttempt.status}`);
+      }
+    } catch (err) {
+      if (err instanceof Error) {
+        throw new Error(err.message || "Failed to sign in");
+      } else {
+        throw new Error("An unexpected error occurred");
+      }
+    }
+  };
 
   return (
     <Container withScrollView contentContainerStyle={styles.container}>
@@ -62,27 +63,37 @@ export default function SignIn() {
         <Text style={styles.subtitle}>Log in to your account</Text>
       </View>
 
-      {generalError && <ErrorMessage message={generalError} />}
-
-      <FormField
-        label="Email"
-        value={values.email}
-        onChangeText={(value) => updateField("email", value)}
-        placeholder="Enter your email"
-        keyboardType="email-address"
-        autoCapitalize="none"
-        disabled={isLoading}
-        error={errors.email}
+      <Controller
+        control={control}
+        name="email"
+        render={({ field: { onChange, value } }) => (
+          <FormField
+            label="Email"
+            value={value}
+            onChangeText={onChange}
+            placeholder="Enter your email"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            disabled={isSubmitting || !isLoaded}
+            error={errors.email?.message}
+          />
+        )}
       />
 
       <View style={styles.passwordContainer}>
-        <PasswordInput
-          label="Password"
-          value={values.password}
-          onChangeText={(value) => updateField("password", value)}
-          placeholder="Enter your password"
-          disabled={isLoading}
-          error={errors.password}
+        <Controller
+          control={control}
+          name="password"
+          render={({ field: { onChange, value } }) => (
+            <PasswordInput
+              label="Password"
+              value={value}
+              onChangeText={onChange}
+              placeholder="Enter your password"
+              disabled={isSubmitting || !isLoaded}
+              error={errors.password?.message}
+            />
+          )}
         />
 
         <Link href="/(auth)/forgot-password" style={styles.forgotPasswordLink}>
@@ -93,9 +104,9 @@ export default function SignIn() {
       <Button
         title="Sign In"
         variant="primary"
-        onPress={handleSubmit}
-        loading={isLoading}
-        disabled={isLoading || !values.email || !values.password}
+        onPress={handleSubmit(onSubmit)}
+        loading={isSubmitting || !isLoaded}
+        disabled={isSubmitting || !isLoaded}
         style={styles.button}
       />
 

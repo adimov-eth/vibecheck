@@ -3,8 +3,8 @@ import { AppBar } from '@/components/layout/AppBar';
 import { Container } from '@/components/layout/Container';
 import { Button } from '@/components/ui/Button';
 import { colors, spacing, typography } from '@/constants/styles';
-import { useConversations } from '@/hooks/useApi';
-import { useWebSocketResults } from '@/hooks/useWebSocket';
+import { useConversation } from '@/hooks/useConversation';
+import { useConversationResult } from '@/hooks/useConversationResult';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
@@ -14,24 +14,18 @@ export default function Results() {
   const router = useRouter();
   const conversationId = id as string;
 
-  // Get conversation results using the API hooks
-  const { getConversationResult } = useConversations();
-  const { data, isLoading, error, refetch } = getConversationResult(conversationId);
-  
-  // Use WebSocket for real-time updates
-  const {
-    isProcessing,
-    isUsingWebSocket,
-    isWebSocketConnected,
-    processingProgress
-  } = useWebSocketResults(conversationId);
+  // Get conversation details and results
+  const { conversation, isLoading: conversationLoading } = useConversation(conversationId);
+  const { 
+    data: result, 
+    isLoading, 
+    error, 
+    refetch 
+  } = useConversationResult(conversationId);
 
-  // Determine the appropriate accent color based on conversation type
-  // In a real app, this would come from the conversation data or a separate API call
-  const accentColor = data?.additionalData?.category === 'mediator' ? '#58BD7D' : 
-                     data?.additionalData?.category === 'counselor' ? '#3B71FE' :
-                     data?.additionalData?.category === 'dinner' ? '#4BC9F0' :
-                     data?.additionalData?.category === 'movie' ? '#FF6838' : 
+  // Determine the appropriate accent color based on conversation mode
+  const accentColor = conversation?.mode === 'mediator' ? '#58BD7D' : 
+                     conversation?.mode === 'counselor' ? '#3B71FE' : 
                      colors.primary;
   
   // Handle navigation back to home
@@ -64,50 +58,48 @@ export default function Results() {
         onBackPress={handleGoToHome} 
       />
       
-      {isProcessing && (
+      {result?.status === 'processing' && (
         <View style={styles.processingContainer}>
           <ActivityIndicator size="large" color={accentColor} />
           <Text style={styles.processingText}>
             Processing your conversation...
           </Text>
           
-          {processingProgress > 0 && (
+          {result?.progress > 0 && (
             <View style={styles.progressContainer}>
               <View style={styles.progressBackground}>
                 <View 
                   style={[
                     styles.progressBar, 
-                    { width: `${processingProgress}%`, backgroundColor: accentColor }
+                    { width: `${result.progress}%`, backgroundColor: accentColor }
                   ]} 
                 />
               </View>
-              <Text style={styles.progressText}>{processingProgress}%</Text>
+              <Text style={styles.progressText}>{result.progress}%</Text>
             </View>
           )}
           
           <View style={styles.connectionInfoContainer}>
             <View style={[
               styles.connectionIndicator,
-              { backgroundColor: isWebSocketConnected ? colors.success : colors.warning }
+              { backgroundColor: result ? colors.success : colors.warning }
             ]} />
             <Text style={styles.connectionInfoText}>
-              {isUsingWebSocket 
-                ? 'Using real-time updates' 
-                : 'Using background processing'}
+              Using real-time updates
             </Text>
           </View>
         </View>
       )}
       
-      {!isProcessing && (
+      {result?.status !== 'processing' && (
         <ResultsView
-          isLoading={isLoading}
-          progress={processingProgress}
-          result={data || null}
-          error={error?.message || null}
+          isLoading={isLoading || conversationLoading}
+          result={result || null}
+          error={error?.message || result?.error || null}
           accentColor={accentColor}
           onNewConversation={handleGoToHome}
           onRetry={() => refetch()}
+          progress={result?.progress || 0}
         />
       )}
     </Container>
@@ -145,6 +137,7 @@ const styles = StyleSheet.create({
   progressContainer: {
     width: '80%',
     alignItems: 'center',
+    marginBottom: spacing.xl,
   },
   progressBackground: {
     width: '100%',
@@ -159,6 +152,7 @@ const styles = StyleSheet.create({
   progressText: {
     ...typography.caption,
     marginTop: spacing.xs,
+    color: colors.mediumText,
   },
   connectionInfoContainer: {
     flexDirection: 'row',

@@ -1,87 +1,31 @@
-import { subscriptionApi } from '@/services/api/subscription';
-import { type SubscriptionStatus } from '@/types/subscription';
-import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
-import { useCallback, useEffect } from 'react';
-import { useSubscriptionStore } from './useTypedStore';
-
-const DEFAULT_STALE_TIME = 1000 * 60 * 5; // 5 minutes
-// const DEFAULT_GCTIME = 1000 * 60 * 60; // 1 hour
-
-export const useSubscriptionStatus = (options?: Omit<UseQueryOptions<SubscriptionStatus, Error>, 'queryKey' | 'queryFn'>) => {
-  const query = useQuery<SubscriptionStatus, Error>({
-    queryKey: ['subscriptionStatus'],
-    queryFn: () => subscriptionApi.getSubscriptionStatus(),
-    staleTime: DEFAULT_STALE_TIME,
-    ...options,
-  });
-  return query;
-};
+import { useEffect } from 'react';
+import useStore from '../state/index';
 
 export const useSubscription = () => {
   const {
-    isSubscribed,
-    subscriptionPlan,
-    expiryDate,
-    isLoading: storeLoading,
-    error: storeError,
     subscriptionProducts,
-    purchaseSubscription,
-    restorePurchases,
-    fetchSubscriptionProducts,
-  } = useSubscriptionStore();
+    subscriptionLoading: isLoading,
+    subscriptionError: error,
+    subscriptionStatus,
+    initializeStore,
+    cleanupStore,
+    purchaseSubscription: purchase,
+    restorePurchases: restore,
+  } = useStore();
 
-  const {
-    data: serverStatus,
-    isLoading: serverLoading,
-    error: serverError,
-    refetch: refetchStatus,
-  } = useSubscriptionStatus();
-
-  // Fetch products on mount
   useEffect(() => {
-    void fetchSubscriptionProducts();
-  }, [fetchSubscriptionProducts]);
-
-  // Enhanced purchase function that refetches status
-  const handlePurchase = useCallback(async (
-    productId: string,
-    offerToken?: string,
-  ) => {
-    const success = await purchaseSubscription(productId, offerToken);
-    if (success) {
-      await refetchStatus();
-    }
-    return success;
-  }, [purchaseSubscription, refetchStatus]);
-
-  // Enhanced restore function that refetches status
-  const handleRestore = useCallback(async () => {
-    const success = await restorePurchases();
-    if (success) {
-      await refetchStatus();
-    }
-    return success;
-  }, [restorePurchases, refetchStatus]);
+    initializeStore();
+    return () => {
+      cleanupStore();
+    };
+  }, [initializeStore, cleanupStore]);
 
   return {
-    // Subscription status
-    isSubscribed,
-    subscriptionPlan,
-    expiryDate,
-    serverStatus,
-
-    // Available products
+    isSubscribed: subscriptionStatus?.active ?? false,
     subscriptionProducts,
-
-    // Loading states
-    isLoading: storeLoading || serverLoading,
-    
-    // Errors
-    error: storeError || serverError,
-
-    // Actions
-    purchase: handlePurchase,
-    restore: handleRestore,
-    refetchStatus,
+    purchase,
+    restore,
+    isLoading,
+    error,
   };
 }; 

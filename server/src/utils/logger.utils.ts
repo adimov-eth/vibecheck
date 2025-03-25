@@ -1,7 +1,5 @@
-// src/utils/logger.utils.ts
 import winston from 'winston';
 
-// Get log level from environment or default to info
 const logLevel = process.env.LOG_LEVEL || 'info';
 
 export const logger = winston.createLogger({
@@ -25,9 +23,6 @@ export const logger = winston.createLogger({
   ],
 });
 
-// Log once what level we're using
 logger.info(`Logger initialized with level: ${logLevel}`);
 
-export const log = (message: string, level: 'info' | 'error' | 'warn' | 'debug' = 'info') => {
-  logger.log({ level, message });
-};
+export const log = logger.log.bind(logger); // For backward compatibility

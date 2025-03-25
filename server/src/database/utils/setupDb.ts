@@ -1,38 +1,35 @@
-import { log } from '../../utils/logger.utils';
+import { logger } from '../../utils/logger.utils';
+import { withDbConnection } from '../index';
 import addIndexes from '../migrations/add_indexes';
 import optimizeDatabase from '../migrations/optimize_database';
 import testTransactions from './transactionTest';
-import { withDbConnection } from '../index';
 
 async function setupDatabase() {
   try {
-    log('Starting database setup...', 'info');
+    logger.info('Starting database setup...');
 
-    log('Running migrations...', 'info');
+    logger.info('Running migrations...');
     await withDbConnection(addIndexes);
 
-    log('Optimizing database...', 'info');
+    logger.info('Optimizing database...');
     await withDbConnection(optimizeDatabase);
 
-    log('Testing database connection pool and transactions...', 'info');
+    logger.info('Testing database connection pool and transactions...');
     await testTransactions();
 
-    log('Database setup completed successfully', 'info');
+    logger.info('Database setup completed successfully');
     return true;
   } catch (error) {
-    log(`Database setup failed: ${error}`, 'error');
+    logger.error(`Database setup failed: ${error}`);
     return false;
   }
 }
 
 if (require.main === module) {
   setupDatabase()
-    .then((success) => {
-      if (success) process.exit(0);
-      else process.exit(1);
-    })
+    .then((success) => process.exit(success ? 0 : 1))
     .catch((error) => {
-      log(`Unexpected error during database setup: ${error}`, 'error');
+      logger.error(`Unexpected error during database setup: ${error}`);
       process.exit(1);
     });
 }

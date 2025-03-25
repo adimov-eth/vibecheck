@@ -3,14 +3,10 @@ import { FormField } from "@/components/forms/FormField";
 import { Container } from "@/components/layout/Container";
 import { Button } from "@/components/ui/Button";
 import { colors, spacing, typography } from "@/constants/styles";
-import { useForm } from "@/hooks/useForm";
-import {
-  forgotPasswordVerificationSchema,
-  type ForgotPasswordVerificationData,
-} from "@/validations/auth";
+import { forgotPasswordVerificationSchema } from "@/validations/auth";
 import { useSignUp } from "@clerk/clerk-expo";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 export default function VerifyEmail() {
@@ -18,43 +14,48 @@ export default function VerifyEmail() {
   const { email } = useLocalSearchParams<{ email: string }>();
   const { signUp, setActive } = useSignUp();
 
-  const {
-    values,
-    errors,
-    isLoading,
-    generalError,
-    updateField,
-    handleSubmit,
-  } = useForm<ForgotPasswordVerificationData>({
-    initialValues: {
-      code: "",
-    },
-    validationSchema: forgotPasswordVerificationSchema,
-    onSubmit: async (values) => {
+  // Form state
+  const [code, setCode] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Validate and submit form
+  const handleSubmit = async () => {
+    try {
+      setError(null);
+      setIsLoading(true);
+
+      // Validate input
+      const result = forgotPasswordVerificationSchema.safeParse({ code });
+      if (!result.success) {
+        setError(result.error.errors[0].message);
+        return;
+      }
+
       if (!signUp) {
         throw new Error("Sign up not available");
       }
 
-      try {
-        // Attempt to verify email
-        const result = await signUp.attemptEmailAddressVerification({
-          code: values.code,
-        });
+      // Attempt to verify email
+      const verificationResult = await signUp.attemptEmailAddressVerification({
+        code,
+      });
 
-        // Handle verification response
-        if (result.status === "complete" && result.createdSessionId) {
-          // Set the active session
-          await setActive({ session: result.createdSessionId });
-          router.replace("/home");
-        } else {
-          throw new Error(`Email verification failed: ${result.status}`);
-        }
-      } catch (err) {
-        const error = err as Error;
-        throw new Error(error.message || "Failed to verify email");
+      // Handle verification response
+      if (verificationResult.status === "complete" && verificationResult.createdSessionId) {
+        // Set the active session
+        await setActive({ session: verificationResult.createdSessionId });
+        router.replace("/home");
+      } else {
+        throw new Error(`Email verification failed: ${verificationResult.status}`);
       }
-    },
-  });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to verify email";
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <Container withScrollView contentContainerStyle={styles.container}>
@@ -65,17 +66,17 @@ export default function VerifyEmail() {
         </Text>
       </View>
 
-      {generalError && <ErrorMessage message={generalError} />}
+      {error && <ErrorMessage message={error} />}
 
       <FormField
         label="Verification Code"
-        value={values.code}
-        onChangeText={(value) => updateField("code", value)}
+        value={code}
+        onChangeText={setCode}
         placeholder="Enter verification code"
         keyboardType="numeric"
         autoCapitalize="none"
         disabled={isLoading}
-        error={errors.code}
+        error={undefined}
       />
 
       <Button
@@ -83,7 +84,7 @@ export default function VerifyEmail() {
         variant="primary"
         onPress={handleSubmit}
         loading={isLoading}
-        disabled={isLoading || !values.code}
+        disabled={isLoading || !code}
         style={styles.button}
       />
     </Container>

@@ -6,6 +6,7 @@ import { Container } from '@/components/layout/Container';
 import { Button } from '@/components/ui/Button';
 import { showToast } from '@/components/ui/Toast';
 import { colors, spacing, typography } from '@/constants/styles';
+import { useUser } from '@clerk/clerk-expo';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -18,6 +19,7 @@ interface FormState {
 
 export default function UpdatePassword() {
   const router = useRouter();
+  const { user } = useUser();
   // Form state
   const [formData, setFormData] = useState<FormState>({
     currentPassword: '',
@@ -74,9 +76,10 @@ export default function UpdatePassword() {
     setError(null);
     
     try {
-      // In a real app, this would make an API call to change the password
-      // For now we'll just simulate success
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await user?.updatePassword({
+        currentPassword: formData.currentPassword,
+        newPassword: formData.newPassword,
+      });
       
       // Show success toast
       showToast.success('Password Updated', 'Your password has been successfully updated');
