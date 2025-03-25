@@ -20,7 +20,9 @@ export const createConversation = async ({
     try {
       const id = randomUUIDv7();
       
-      // First verify user exists
+      // Get user or create if doesn't exist from Clerk
+      // If this is being called, we've already passed auth middleware,
+      // so we know the user exists in Clerk
       const userExistsResult = await query<{ exists_flag: number }>(
         'SELECT 1 as exists_flag FROM users WHERE id = ? LIMIT 1',
         [userId]
@@ -29,7 +31,14 @@ export const createConversation = async ({
       const userExists = userExistsResult[0]?.exists_flag === 1;
       
       if (!userExists) {
-        throw new Error(`User ${userId} not found`);
+        // Create the user record instead of throwing an error
+        // We defer to the auth middleware to provide complete user details
+        // This is a fallback to ensure we can create the conversation
+        await run(
+          'INSERT INTO users (id) VALUES (?)',
+          [userId]
+        );
+        logger.info(`Created minimal user record for ${userId} during conversation creation`);
       }
       
       const conversations = await query<Conversation>(
