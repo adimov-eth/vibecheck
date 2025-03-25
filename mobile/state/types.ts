@@ -57,17 +57,101 @@ export interface UsageResponse {
   message?: string;
 }
 
-export interface WebSocketMessage {
-  type: 'transcript' | 'analysis' | 'error' | 'status';
-  payload: {
-    conversationId?: string;
-    content?: string;
-    error?: string;
-    status?: string;
-    gptResponse?: string;
-  };
+export type WebSocketMessageType = 
+  | 'transcript' 
+  | 'analysis' 
+  | 'error' 
+  | 'status' 
+  | 'connected' 
+  | 'subscription_confirmed' 
+  | 'unsubscription_confirmed' 
+  | 'pong'
+  | 'audio';
+
+// Base message interface with common fields
+export interface BaseWebSocketMessage {
+  type: WebSocketMessageType;
   timestamp: string;
 }
+
+// Specialized message interfaces for better type safety
+export interface TranscriptMessage extends BaseWebSocketMessage {
+  type: 'transcript';
+  payload: {
+    conversationId: string;
+    content: string;
+  };
+}
+
+export interface AnalysisMessage extends BaseWebSocketMessage {
+  type: 'analysis';
+  payload: {
+    conversationId: string;
+    content: string;
+  };
+}
+
+export interface ErrorMessage extends BaseWebSocketMessage {
+  type: 'error';
+  payload: {
+    conversationId?: string;
+    error: string;
+  };
+}
+
+export interface StatusMessage extends BaseWebSocketMessage {
+  type: 'status';
+  payload: {
+    conversationId: string;
+    status: string;
+    gptResponse?: string;
+    error?: string;
+  };
+}
+
+export interface AudioMessage extends BaseWebSocketMessage {
+  type: 'audio';
+  payload: {
+    audioId: string;
+    status: 'processing' | 'transcribed' | 'failed';
+    conversationId?: string;
+  };
+}
+
+export interface ConnectionMessage extends BaseWebSocketMessage {
+  type: 'connected';
+  payload: {
+    message: string;
+    serverTime: string;
+    connectionId: string;
+  };
+}
+
+export interface SubscriptionMessage extends BaseWebSocketMessage {
+  type: 'subscription_confirmed' | 'unsubscription_confirmed';
+  payload: {
+    topic: string;
+    activeSubscriptions: string[];
+  };
+}
+
+export interface PongMessage extends BaseWebSocketMessage {
+  type: 'pong';
+  payload: {
+    serverTime: string;
+  };
+}
+
+// Union type for all WebSocket messages
+export type WebSocketMessage = 
+  | TranscriptMessage
+  | AnalysisMessage
+  | ErrorMessage
+  | StatusMessage
+  | AudioMessage
+  | ConnectionMessage
+  | SubscriptionMessage
+  | PongMessage;
 
 export interface SubscriptionSlice {
   subscriptionStatus: SubscriptionStatus | null;

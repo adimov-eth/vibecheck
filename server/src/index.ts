@@ -23,7 +23,10 @@ server.on('upgrade', async (req: IncomingMessage, socket: Socket, head: Buffer) 
   }
 
   const token = url.searchParams.get('token');
+  const version = url.searchParams.get('version') || 'v1'; // Track client version
+  
   if (!token) {
+    logger.warn('WebSocket upgrade attempted without token');
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;
@@ -32,11 +35,13 @@ server.on('upgrade', async (req: IncomingMessage, socket: Socket, head: Buffer) 
   try {
     const userId = await verifySessionToken(token);
     if (!userId) {
+      logger.warn('Invalid token for WebSocket upgrade');
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
     }
 
+    logger.info(`WebSocket connection established for user ${userId} (version: ${version})`);
     websocketManager.handleUpgrade(req, socket, head, userId);
   } catch (error) {
     logger.error(`WebSocket upgrade error: ${error}`);

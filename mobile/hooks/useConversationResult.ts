@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import useStore from '../state/index';
 import type { WebSocketMessage } from '../state/types';
 
@@ -14,6 +14,10 @@ export const useConversationResult = (conversationId: string) => {
   const [data, setData] = useState<ConversationResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  
+  // Use refs to track subscription status
+  const isSubscribed = useRef(false);
+  const lastAttemptTime = useRef(0);
 
   const {
     wsMessages,
@@ -27,60 +31,81 @@ export const useConversationResult = (conversationId: string) => {
 
   useEffect(() => {
     let mounted = true;
-    let retryCount = 0;
-    const maxRetries = 5;
+    const checkInterval = useRef<NodeJS.Timeout | null>(null);
 
+    // Attempt to subscribe and return success status
     const attemptSubscription = () => {
-      console.log('Attempting to subscribe to conversation:', conversationId, 'WebSocket state:', socket?.readyState);
-      if (socket?.readyState === WebSocket.OPEN && mounted) {
-        console.log('Subscribing to conversation:', conversationId);
-        subscribeToConversation(conversationId);
-        return true;
+      if (!mounted) return false;
+      
+      // Only log in development
+      if (__DEV__) {
+        console.log('Attempting to subscribe to conversation:', conversationId);
       }
-      return false;
+      
+      // Subscribe regardless of current socket state - the subscribe function
+      // will handle reconnection internally if needed
+      subscribeToConversation(conversationId);
+      isSubscribed.current = true;
+      lastAttemptTime.current = Date.now();
+      return true;
     };
 
-    const setupWebSocket = async () => {
-      try {
-        console.log('Setting up WebSocket for conversation:', conversationId);
+    // Set up a periodic health check to ensure subscription is active
+    const startConnectionHealthCheck = () => {
+      // Clear any existing interval
+      if (checkInterval.current) {
+        clearInterval(checkInterval.current);
+      }
+      
+      // Check connection every 15 seconds
+      checkInterval.current = setInterval(() => {
+        if (!mounted) return;
         
-        if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
-          console.log('WebSocket not connected, connecting now...');
-          await connectWebSocket();
-          
-          // Wait a moment after connection before subscribing
-          setTimeout(() => {
-            if (mounted) {
-              attemptSubscription();
-            }
-          }, 500);
-        } else {
-          // Initial subscription attempt
-          attemptSubscription();
-        }
-
-        // Set up retry mechanism for subscription
-        const retrySubscription = () => {
-          if (!mounted || retryCount >= maxRetries) return;
-          
-          // Only retry if not already subscribed
-          if (!attemptSubscription()) {
-            const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000);
-            retryCount++;
-            
-            console.log(`Retry ${retryCount}/${maxRetries} for conversation ${conversationId} in ${retryDelay}ms`);
-            
-            setTimeout(() => {
-              retrySubscription();
-            }, retryDelay);
+        const now = Date.now();
+        const timeSinceLastAttempt = now - lastAttemptTime.current;
+        
+        // If socket is closed and we haven't attempted in the last 10 seconds
+        if ((!socket || socket.readyState !== WebSocket.OPEN) && timeSinceLastAttempt > 10000) {
+          if (__DEV__) {
+            console.log('Health check: WebSocket connection needs refresh');
           }
-        };
-
-        // Start retry sequence after a short delay
-        setTimeout(retrySubscription, 1000);
+          connectWebSocket();
+          lastAttemptTime.current = now;
+        }
         
+        // If we've been connected for at least 5 seconds but haven't received messages
+        // for this conversation, try re-subscribing
+        if (socket?.readyState === WebSocket.OPEN && timeSinceLastAttempt > 5000) {
+          const hasRelevantMessages = wsMessages.some(
+            msg => (msg.payload.conversationId === conversationId) || 
+                   (msg.payload.conversation && msg.payload.conversation.id === conversationId)
+          );
+          
+          if (!hasRelevantMessages && isSubscribed.current) {
+            if (__DEV__) {
+              console.log('Health check: No messages received, re-subscribing');
+            }
+            subscribeToConversation(conversationId);
+            lastAttemptTime.current = now;
+          }
+        }
+      }, 15000);
+    };
+
+    // Initialize the connection and subscription
+    const initialize = async () => {
+      try {
+        if (__DEV__) {
+          console.log('Initializing WebSocket for conversation:', conversationId);
+        }
+        
+        // Always attempt to subscribe, which will connect if needed
+        attemptSubscription();
+        
+        // Start health check to ensure connection remains active
+        startConnectionHealthCheck();
       } catch (err) {
-        console.error('WebSocket subscription error:', err);
+        console.error('WebSocket initialization error:', err);
         if (mounted) {
           setError(err instanceof Error ? err : new Error('Failed to connect to WebSocket'));
           setIsLoading(false);
@@ -88,26 +113,50 @@ export const useConversationResult = (conversationId: string) => {
       }
     };
 
-    setupWebSocket();
+    initialize();
 
     return () => {
-      console.log('Unsubscribing from conversation:', conversationId);
+      if (__DEV__) {
+        console.log('Cleaning up WebSocket for conversation:', conversationId);
+      }
       mounted = false;
+      isSubscribed.current = false;
+      
+      if (checkInterval.current) {
+        clearInterval(checkInterval.current);
+      }
+      
       unsubscribeFromConversation(conversationId);
     };
   }, [conversationId, socket, connectWebSocket, subscribeToConversation, unsubscribeFromConversation]);
 
   useEffect(() => {
-    // Log all WebSocket messages for debugging
-    console.log('All WebSocket messages:', wsMessages);
+    // Only log in development mode
+    if (__DEV__) {
+      console.log('Processing messages for conversation:', conversationId);
+    }
     
     // Filter messages for this conversation, but be more flexible with conversationId location
     const relevantMessages = wsMessages.filter(
-      (msg) => (msg.payload.conversationId === conversationId) || 
-               (msg.payload.conversation && msg.payload.conversation.id === conversationId)
+      (msg) => {
+        // Handle different message types according to their specific structure
+        if (msg.type === 'transcript' || msg.type === 'analysis' || msg.type === 'status') {
+          return msg.payload.conversationId === conversationId;
+        } else if (msg.type === 'audio') {
+          return msg.payload.conversationId === conversationId;
+        } else if (msg.type === 'error') {
+          // Include error messages that might be related to this conversation
+          return !msg.payload.conversationId || msg.payload.conversationId === conversationId;
+        }
+        
+        // Filter out connection, subscription and pong messages
+        return false;
+      }
     );
 
-    console.log('Relevant messages for conversation:', conversationId, relevantMessages);
+    if (__DEV__) {
+      console.log(`Found ${relevantMessages.length} relevant messages for conversation ${conversationId}`);
+    }
 
     if (relevantMessages.length === 0) {
       setData({
@@ -124,49 +173,72 @@ export const useConversationResult = (conversationId: string) => {
     };
 
     relevantMessages.forEach((msg: WebSocketMessage) => {
-      console.log('Processing message:', msg);
+      if (__DEV__) {
+        console.log('Processing message:', msg.type);
+      }
+      
+      // Process each message type based on the specific payload structure
       switch (msg.type) {
         case 'transcript':
-          result.transcript = msg.payload.content;
+          // Transcript messages contain the raw transcription
+          const transcriptMsg = msg as TranscriptMessage;
+          result.transcript = transcriptMsg.payload.content;
           result.progress = 50;
           break;
+          
         case 'analysis':
-          result.analysis = msg.payload.content;
+          // Analysis messages contain the GPT analysis
+          const analysisMsg = msg as AnalysisMessage;
+          result.analysis = analysisMsg.payload.content;
           result.progress = 100;
           break;
+          
         case 'error':
+          // Error messages indicate something went wrong
+          const errorMsg = msg as ErrorMessage;
           result.status = 'error';
-          result.error = msg.payload.error;
+          result.error = errorMsg.payload.error;
           result.progress = 100;
           clearUploadState(conversationId);
           break;
+          
         case 'status':
-          // More flexible handling of status messages
-          if (msg.payload.status === 'conversation_completed' || msg.payload.status === 'completed') {
+          // Status messages indicate conversation state changes
+          const statusMsg = msg as StatusMessage;
+          
+          if (statusMsg.payload.status === 'conversation_completed' || 
+              statusMsg.payload.status === 'completed') {
+            // Conversation is fully processed
             result.status = 'completed';
             
-            // Check different possible locations for the gptResponse
-            if (msg.payload.gptResponse) {
-              result.analysis = msg.payload.gptResponse;
-            } else if (msg.payload.conversation && msg.payload.conversation.gptResponse) {
-              result.analysis = msg.payload.conversation.gptResponse;
-            } else if (msg.payload.content) {
-              result.analysis = msg.payload.content;
+            // Use gptResponse from the status message if available
+            if (statusMsg.payload.gptResponse) {
+              result.analysis = statusMsg.payload.gptResponse;
             }
             
             result.progress = 100;
             clearUploadState(conversationId);
-          } else if (msg.payload.status === 'error') {
+          } else if (statusMsg.payload.status === 'error') {
+            // Status can also indicate an error
             result.status = 'error';
-            result.error = msg.payload.error;
+            result.error = statusMsg.payload.error || 'Unknown error occurred';
             result.progress = 100;
             clearUploadState(conversationId);
           }
           break;
+          
         case 'audio':
-          // Handle audio notifications
-          if (msg.payload.status === 'transcribed') {
+          // Audio processing status updates
+          const audioMsg = msg as AudioMessage;
+          if (audioMsg.payload.status === 'transcribed') {
+            // Audio transcription complete - update progress
             result.progress = Math.max(result.progress, 40);
+          } else if (audioMsg.payload.status === 'failed') {
+            // Audio processing failed
+            result.status = 'error';
+            result.error = 'Audio processing failed';
+            result.progress = 100;
+            clearUploadState(conversationId);
           }
           break;
       }
