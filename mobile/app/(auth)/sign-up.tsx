@@ -1,66 +1,67 @@
-import { ErrorMessage } from "@/components/feedback/ErrorMessage";
 import { FormField } from "@/components/forms/FormField";
 import { PasswordInput } from "@/components/forms/PasswordInput";
 import { Container } from "@/components/layout/Container";
 import { Button } from "@/components/ui/Button";
 import { colors, spacing, typography } from "@/constants/styles";
-import { useForm } from "@/hooks/useForm";
 import { signUpSchema, type SignUpFormData } from "@/validations/auth";
 import { useSignUp } from "@clerk/clerk-expo";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { Link, useRouter } from "expo-router";
 import React from "react";
+import { Controller, SubmitHandler, useForm } from "react-hook-form";
 import { StyleSheet, Text, View } from "react-native";
 
 export default function SignUp() {
   const router = useRouter();
-  const { signUp, setActive } = useSignUp();
+  const { signUp, setActive, isLoaded } = useSignUp();
 
   const {
-    values,
-    errors,
-    isLoading,
-    generalError,
-    updateField,
+    control,
     handleSubmit,
+    formState: { errors, isSubmitting },
   } = useForm<SignUpFormData>({
-    initialValues: {
+    resolver: zodResolver(signUpSchema),
+    defaultValues: {
       email: "",
       password: "",
       confirmPassword: "",
     },
-    validationSchema: signUpSchema,
-    onSubmit: async (values) => {
-      if (!signUp) {
-        throw new Error("Sign up not available");
-      }
-
-      try {
-        // Attempt to sign up
-        const result = await signUp.create({
-          emailAddress: values.email,
-          password: values.password,
-        });
-
-        // Handle sign up response
-        if (result.status === "complete") {
-          // Set the active session
-          await setActive({ session: result.createdSessionId });
-          router.replace("/home");
-        } else if (result.status === "missing_requirements") {
-          // Email verification needed
-          router.push({
-            pathname: "/verify-email",
-            params: { email: values.email },
-          });
-        } else {
-          throw new Error(`Sign up failed: ${result.status}`);
-        }
-      } catch (err) {
-        const error = err as Error;
-        throw new Error(error.message || "Failed to sign up");
-      }
-    },
   });
+
+  const onSubmit: SubmitHandler<SignUpFormData> = async (data) => {
+    if (!isLoaded || !signUp) return;
+
+    try {
+      // Start the sign-up process using email and password
+      const signUpAttempt = await signUp.create({
+        emailAddress: data.email,
+        password: data.password,
+      });
+
+      // Handle sign up response
+      if (signUpAttempt.status === "complete") {
+        // Set the active session
+        await setActive({ session: signUpAttempt.createdSessionId });
+        router.replace("/home");
+      } else if (signUpAttempt.status === "missing_requirements") {
+        // Email verification needed
+        router.push({
+          pathname: "/verify-email",
+          params: { email: data.email },
+        });
+      } else {
+        // User needs to complete additional steps
+        console.error(JSON.stringify(signUpAttempt, null, 2));
+        throw new Error(`Sign up failed: ${signUpAttempt.status}`);
+      }
+    } catch (err) {
+      if (err instanceof Error) {
+        throw new Error(err.message || "Failed to sign up");
+      } else {
+        throw new Error("An unexpected error occurred");
+      }
+    }
+  };
 
   return (
     <Container withScrollView contentContainerStyle={styles.container}>
@@ -69,50 +70,61 @@ export default function SignUp() {
         <Text style={styles.subtitle}>Sign up to get started</Text>
       </View>
 
-      {generalError && <ErrorMessage message={generalError} />}
-
-      <FormField
-        label="Email"
-        value={values.email}
-        onChangeText={(value) => updateField("email", value)}
-        placeholder="Enter your email"
-        keyboardType="email-address"
-        autoCapitalize="none"
-        disabled={isLoading}
-        error={errors.email}
+      <Controller
+        control={control}
+        name="email"
+        render={({ field: { onChange, value } }) => (
+          <FormField
+            label="Email"
+            value={value}
+            onChangeText={onChange}
+            placeholder="Enter your email"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            disabled={isSubmitting || !isLoaded}
+            error={errors.email?.message}
+          />
+        )}
       />
 
-      <PasswordInput
-        label="Password"
-        value={values.password}
-        onChangeText={(value) => updateField("password", value)}
-        placeholder="Create a password"
-        disabled={isLoading}
-        error={errors.password}
+      <Controller
+        control={control}
+        name="password"
+        render={({ field: { onChange, value } }) => (
+          <PasswordInput
+            label="Password"
+            value={value}
+            onChangeText={onChange}
+            placeholder="Create a password"
+            disabled={isSubmitting || !isLoaded}
+            error={errors.password?.message}
+          />
+        )}
       />
 
       <View style={styles.confirmPasswordContainer}>
-        <PasswordInput
-          label="Confirm Password"
-          value={values.confirmPassword}
-          onChangeText={(value) => updateField("confirmPassword", value)}
-          placeholder="Confirm your password"
-          disabled={isLoading}
-          error={errors.confirmPassword}
+        <Controller
+          control={control}
+          name="confirmPassword"
+          render={({ field: { onChange, value } }) => (
+            <PasswordInput
+              label="Confirm Password"
+              value={value}
+              onChangeText={onChange}
+              placeholder="Confirm your password"
+              disabled={isSubmitting || !isLoaded}
+              error={errors.confirmPassword?.message}
+            />
+          )}
         />
       </View>
 
       <Button
         title="Sign Up"
         variant="primary"
-        onPress={handleSubmit}
-        loading={isLoading}
-        disabled={
-          isLoading ||
-          !values.email ||
-          !values.password ||
-          !values.confirmPassword
-        }
+        onPress={handleSubmit(onSubmit)}
+        loading={isSubmitting || !isLoaded}
+        disabled={isSubmitting || !isLoaded}
         style={styles.button}
       />
 

@@ -2,10 +2,9 @@ import { ModeCard } from '@/components/conversation/ModeCard';
 import { AppBar } from '@/components/layout/AppBar';
 import { Container } from '@/components/layout/Container';
 import { colors, spacing, typography } from '@/constants/styles';
-import { useUsage } from '@/hooks/useApi';
-import { useSubscription } from '@/hooks/useSubscription';
+import useStore from '@/state';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 // Define the available conversation modes
@@ -38,20 +37,24 @@ const CONVERSATION_MODES = [
 
 export default function Home() {
   const router = useRouter();
-  
-  // Use React Query hooks for data fetching
   const { 
-    isSubscribed, 
-    subscriptionPlan,
-    isLoading: subscriptionLoading,
-    error: subscriptionError,
-  } = useSubscription();
+    subscriptionStatus,
+    usageStats,
+    checkSubscriptionStatus,
+    getUsageStats
+  } = useStore();
+
+  // Fetch subscription and usage data on mount
+  useEffect(() => {
+    checkSubscriptionStatus().catch(console.error);
+    getUsageStats().catch(console.error);
+  }, [checkSubscriptionStatus, getUsageStats]);
+
+  // Loading state - when both subscription and usage stats are null
+  const isLoading = !subscriptionStatus && !usageStats;
   
-  const { 
-    usageData,
-    isLoading: usageLoading,
-    error: usageError,
-  } = useUsage();
+  // Error state - when either subscription or usage stats failed to load
+  const error = !subscriptionStatus || !usageStats;
 
   // Navigate to mode details screen
   const handleSelectMode = (mode: typeof CONVERSATION_MODES[0]) => {
@@ -59,7 +62,7 @@ export default function Home() {
   };
 
   // Loading state
-  if (subscriptionLoading || usageLoading) {
+  if (isLoading) {
     return (
       <Container withSafeArea>
         <AppBar title="VibeCheck" />
@@ -72,18 +75,12 @@ export default function Home() {
   }
 
   // Error state
-  if (subscriptionError || usageError) {
-    const errorMessage = subscriptionError instanceof Error 
-      ? subscriptionError.message 
-      : usageError instanceof Error 
-        ? usageError.message 
-        : 'Failed to load data';
-
+  if (error) {
     return (
       <Container withSafeArea>
         <AppBar title="VibeCheck" />
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
+          <Text style={styles.errorText}>Failed to load subscription data</Text>
         </View>
       </Container>
     );
@@ -105,9 +102,9 @@ export default function Home() {
         
         <View style={styles.usageContainer}>
           <Text style={styles.usageText}>
-            {isSubscribed ? 
-              `Unlimited conversations (${subscriptionPlan})` : 
-              `${usageData?.remainingConversations || 0} of ${usageData?.limit || 0} conversations left`
+            {subscriptionStatus?.active ? 
+              `Unlimited conversations (${subscriptionStatus.plan})` : 
+              `${usageStats?.remainingMinutes || 0} of ${usageStats?.totalMinutes || 0} minutes left`
             }
           </Text>
         </View>

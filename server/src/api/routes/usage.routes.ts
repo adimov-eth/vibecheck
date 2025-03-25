@@ -1,27 +1,17 @@
-import express, { Request, Response, NextFunction, RequestHandler } from 'express';
+import express, { NextFunction, Request, RequestHandler, Response } from 'express';
 import { getUserUsageStats } from '../../services/usage.service';
-import { authMiddleware } from '../middleware/auth.middleware';
 import { log } from '../../utils/logger.utils';
 
 const router = express.Router();
 
-// Apply auth middleware to all usage routes
-router.use(authMiddleware as RequestHandler);
-
-/**
- * Get user's current usage statistics
- * GET /usage/stats
- */
 router.get('/stats', (async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = req.userId;
-    
+    const userId = req.auth?.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized - User ID not found' });
+      return res.status(401).json({ error: 'Unauthorized' });
     }
-    
+
     const usageStats = await getUserUsageStats(userId, req.db);
-    
     return res.status(200).json({
       usage: {
         currentUsage: usageStats.currentUsage,
@@ -37,4 +27,4 @@ router.get('/stats', (async (req: Request, res: Response, next: NextFunction) =>
   }
 }) as RequestHandler);
 
-export default router; 
+export default router;

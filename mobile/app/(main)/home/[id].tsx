@@ -3,7 +3,7 @@ import { AppBar } from '@/components/layout/AppBar';
 import { Container } from '@/components/layout/Container';
 import { Button } from '@/components/ui/Button';
 import { colors, spacing, typography } from '@/constants/styles';
-import { useUsageStore } from '@/hooks/useTypedStore';
+import { useUsage } from '@/hooks';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -28,7 +28,7 @@ const MODE_DESCRIPTIONS: Record<string, string> = {
 export default function ModeDetails() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const { checkCanCreateConversation } = useUsageStore();
+  const { checkCanCreateConversation } = useUsage();
   
   // Parse the params to get our mode data
   const modeId = typeof id === 'string' ? id : '';

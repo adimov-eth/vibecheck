@@ -1,12 +1,11 @@
-import { drizzle } from 'drizzle-orm/bun-sqlite';
-import { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 import { Database } from 'bun:sqlite';
+import { BunSQLiteDatabase, drizzle } from 'drizzle-orm/bun-sqlite';
+import { logger } from '../utils/logger.utils';
 import * as schema from './schema';
-import { log } from '../utils/logger.utils';
 
 // Database configuration
 const DATABASE_PATH = process.env.DATABASE_URL || 'voice-processing.db';
-const POOL_SIZE = 50;
+const POOL_SIZE = Number(process.env.DB_POOL_SIZE) || 50;
 
 const PRAGMAS = {
   journal_mode: 'WAL',
@@ -37,24 +36,26 @@ class ConnectionPool {
   acquire(): Database {
     const availableConn = this.connections.find(conn => !this.inUse.has(conn));
     if (!availableConn) {
-      log('No available connections in pool, creating new connection', 'warn');
+      logger.warn('No available connections in pool, creating new connection');
       const newConn = new Database(DATABASE_PATH);
       for (const [pragma, value] of Object.entries(PRAGMAS)) {
         newConn.exec(`PRAGMA ${pragma} = ${value}`);
       }
       this.connections.push(newConn);
       this.inUse.add(newConn);
-      log(`Created new connection. In use: ${this.inUse.size}, Available: ${this.available}, Total: ${this.size}`, 'warn');
+      logger.debug(`Created new connection. In use: ${this.inUse.size}, Available: ${this.available}, Total: ${this.size}`);
       return newConn;
     }
     this.inUse.add(availableConn);
-    log(`Connections - In use: ${this.inUse.size}, Available: ${this.available}, Total: ${this.size}`, 'debug');
+    logger.debug(`Connections - In use: ${this.inUse.size}, Available: ${this.available}, Total: ${this.size}`);
     return availableConn;
   }
 
   release(conn: Database): void {
-    this.inUse.delete(conn);
-    log(`Connection released - In use: ${this.inUse.size}, Available: ${this.available}, Total: ${this.size}`, 'debug');
+    if (this.inUse.has(conn)) {
+      this.inUse.delete(conn);
+      logger.debug(`Connection released - In use: ${this.inUse.size}, Available: ${this.available}, Total: ${this.size}`);
+    }
   }
 
   close(): void {
@@ -75,7 +76,7 @@ class ConnectionPool {
 }
 
 const pool = new ConnectionPool(DATABASE_PATH, POOL_SIZE);
-log(`SQLite connection pool initialized with ${POOL_SIZE} connections`, 'info');
+logger.info(`SQLite connection pool initialized with ${POOL_SIZE} connections`);
 
 export type PooledDatabase = BunSQLiteDatabase<typeof schema> & {
   _sqliteDb: Database;
@@ -102,9 +103,10 @@ export async function withDbConnection<T>(fn: (db: PooledDatabase) => Promise<T>
 
 export const shutdownDb = async (): Promise<void> => {
   pool.close();
-  log('Database connection pool closed successfully', 'info');
+  logger.info('Database connection pool closed successfully');
 };
 
+// Ensure shutdown on process termination
 process.on('SIGINT', async () => {
   await shutdownDb();
   process.exit(0);

@@ -1,115 +1,126 @@
-import { useCallback, useEffect } from "react";
-import { useRecordingControls } from "./useRecordingControls";
-import { useRecordingStatus } from "./useRecordingStatus";
-import { useRecordingUpload } from "./useRecordingUpload";
+import { Audio } from "expo-av";
+import { useEffect, useState } from "react";
+import { v4 as uuidv4 } from "uuid";
+import useStore from "../state/index";
+import { useUsage } from "./useUsage";
 
-export interface RecordingFlowHook {
-  // Recording controls
-  recordMode: "separate" | "live";
-  currentPartner: 1 | 2;
-  isRecording: boolean;
-  recordingDuration: number;
-  handleToggleRecording: () => Promise<void>;
-  handleToggleMode: (index: number) => void;
-  
-  // Upload state
-  isUploading: boolean;
-  uploadProgress: number;
-  
-  // Processing state
-  isProcessing: boolean;
-  processingProgress: number;
-  processingComplete: boolean;
-  
-  // Status and errors
-  error: string | null;
-  isUsingWebSocket: boolean;
-  isWebSocketConnected: boolean;
-  
-  // Resources
-  conversationId: string | null;
-  partner1Uri: string | null;
-  partner2Uri: string | null;
-  audioUri: string | null;
-  
-  // Cleanup
-  cleanup: () => Promise<void>;
+interface UseRecordingFlowProps {
+  modeId: string;
+  onComplete: (conversationId: string) => void;
 }
 
-/**
- * Main hook for managing the complete recording flow
- * Coordinates between recording, upload, and status tracking
- */
-export function useRecordingFlow(
-  selectedModeId: string,
-  onRecordingComplete: (conversationId: string) => void
-): RecordingFlowHook {
-  // Initialize sub-hooks
-  const controls = useRecordingControls(selectedModeId);
-  
-  const upload = useRecordingUpload(
-    controls.conversationId,
-    controls.recordMode,
-    {
-      partner1: controls.partner1Uri,
-      partner2: controls.partner2Uri,
-      live: controls.audioUri
-    }
-  );
-  
-  const status = useRecordingStatus(
-    controls.conversationId,
-    onRecordingComplete
-  );
+export const useRecordingFlow = ({ modeId, onComplete }: UseRecordingFlowProps) => {
+  // Local state
+  const [localId] = useState(uuidv4());
+  const [recordMode, setRecordMode] = useState<'separate' | 'live'>('separate');
+  const [currentPartner, setCurrentPartner] = useState<1 | 2>(1);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordings, setRecordings] = useState<string[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [recordingObject, setRecordingObject] = useState<Audio.Recording | null>(null);
 
-  // Start upload when ready
-  useEffect(() => {
-    if (upload.isReadyToUpload && !upload.uploadsComplete && !status.processingComplete) {
-      upload.startUpload().then((success) => {
-        if (success && !status.isUsingWebSocket) {
-          status.startProcessingPolling();
+  const { checkCanCreateConversation } = useUsage();
+  const store = useStore();
+
+  // Toggle recording mode
+  const handleToggleMode = (index: number) => {
+    if (isRecording || isUploading) return;
+    setRecordMode(index === 0 ? 'separate' : 'live');
+    setRecordings([]);
+    setCurrentPartner(1);
+    setError(null);
+  };
+
+  // Start/stop recording
+  const handleToggleRecording = async () => {
+    if (isRecording) {
+      // Stop recording
+      try {
+        await recordingObject?.stopAndUnloadAsync();
+        const uri = recordingObject?.getURI();
+        if (!uri) throw new Error('Recording URI not found');
+        setRecordings((prev) => [...prev, uri]);
+
+        const audioKey = recordMode === 'live' ? 'live' : currentPartner.toString();
+        store.addPendingUpload(localId, uri, audioKey);
+
+        if (recordMode === 'separate' && currentPartner === 1) {
+          setCurrentPartner(2);
+        } else {
+          setIsUploading(true);
+          if (store.localToServerIds[localId]) {
+            store.processPendingUploads(localId);
+          }
         }
-      });
-    }
-  }, [upload.isReadyToUpload, upload.uploadsComplete, status.processingComplete]);
+        setIsRecording(false);
+        setRecordingObject(null);
+      } catch (err) {
+        setError('Failed to stop recording');
+        console.error(err);
+      }
+    } else {
+      // Start recording
+      try {
+        const canCreate = await checkCanCreateConversation(false);
+        if (!canCreate) {
+          setError('Usage limit reached or subscription required');
+          return;
+        }
 
-  // Enhanced cleanup that coordinates all sub-hooks
-  const cleanup = useCallback(async () => {
-    status.resetStatus();
-    upload.resetUpload();
-    await controls.cleanup();
-  }, [status, upload, controls]);
+        if (recordings.length === 0) {
+          await store.createConversation(modeId, recordMode, localId);
+        }
+
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') throw new Error('Permission denied');
+
+        const recording = new Audio.Recording();
+        await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+        await recording.startAsync();
+        setRecordingObject(recording);
+        setIsRecording(true);
+        setError(null);
+      } catch (err) {
+        setError('Failed to start recording');
+        console.error(err);
+      }
+    }
+  };
+
+  // Monitor upload completion
+  useEffect(() => {
+    const serverId = store.localToServerIds[localId];
+    if (!serverId || !isUploading) return;
+
+    const requiredUploads = recordMode === 'live' ? 1 : 2;
+    const successfulUploads = Object.keys(store.uploadResults).filter((uploadId) => {
+      return uploadId.startsWith(serverId) && store.uploadResults[uploadId]?.success;
+    }).length;
+
+    if (successfulUploads === requiredUploads) {
+      onComplete(serverId);
+    }
+  }, [store.localToServerIds, store.uploadResults, localId, recordMode, isUploading, onComplete]);
+
+  // Cleanup function
+  const cleanup = async () => {
+    if (recordingObject && isRecording) {
+      await recordingObject.stopAndUnloadAsync();
+    }
+    setRecordingObject(null);
+    setIsRecording(false);
+  };
 
   return {
-    // Recording controls
-    recordMode: controls.recordMode,
-    currentPartner: controls.currentPartner,
-    isRecording: controls.isRecording,
-    recordingDuration: controls.recordingDuration,
-    handleToggleRecording: controls.handleToggleRecording,
-    handleToggleMode: controls.handleToggleMode,
-    
-    // Upload state
-    isUploading: upload.isUploading,
-    uploadProgress: upload.uploadProgress,
-    
-    // Processing state
-    isProcessing: !upload.uploadsComplete && upload.isReadyToUpload,
-    processingProgress: status.processingProgress,
-    processingComplete: status.processingComplete,
-    
-    // Status and errors
-    error: controls.error || upload.uploadError || status.processingError,
-    isUsingWebSocket: status.isUsingWebSocket,
-    isWebSocketConnected: status.isWebSocketConnected,
-    
-    // Resources
-    conversationId: controls.conversationId,
-    partner1Uri: controls.partner1Uri,
-    partner2Uri: controls.partner2Uri,
-    audioUri: controls.audioUri,
-    
-    // Cleanup
-    cleanup
+    recordMode,
+    currentPartner,
+    isRecording,
+    isUploading,
+    handleToggleMode,
+    handleToggleRecording,
+    error,
+    cleanup,
+    uploadProgress: store.uploadProgress[`${store.localToServerIds[localId]}_${recordMode === 'live' ? 'live' : currentPartner}`] || 0,
   };
-}
+}; 
