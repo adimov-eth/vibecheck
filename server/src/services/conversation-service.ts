@@ -31,13 +31,24 @@ export const createConversation = async ({
       const userExists = userExistsResult[0]?.exists_flag === 1;
       
       if (!userExists) {
-        // Cannot create a user record here because email is required
-        // Instead, redirect to the middleware approach
-        logger.warn(`User ${userId} not found in database but exists in Clerk auth`);
-        throw new Error(`User ${userId} not found in database`);
-        
-        // Note: The ensureUser middleware should catch this and create the user
-        // with proper email and name from the auth object before this service is called
+        // Create a basic user record with the information we have
+        try {
+          logger.warn(`User ${userId} not found in database but exists in Clerk auth. Creating minimal record.`);
+          
+          // Since email is required, let's use a temporary one based on userId
+          // Later the Clerk webhook or auth middleware will update with the real email
+          const tempEmail = `${userId}@temporary.vibecheck.app`;
+          
+          await run(
+            'INSERT INTO users (id, email) VALUES (?, ?)',
+            [userId, tempEmail]
+          );
+          
+          logger.info(`Created minimal user record for ${userId} with temporary email`);
+        } catch (error) {
+          logger.error(`Failed to create user record: ${error instanceof Error ? error.message : String(error)}`);
+          throw new Error(`Failed to create user record for ${userId}`);
+        }
       }
       
       const conversations = await query<Conversation>(
