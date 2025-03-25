@@ -13,6 +13,26 @@ export default function Results() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const conversationId = id as string;
+  
+  // Move all hooks to the top level
+  const { conversation, isLoading: conversationLoading } = useConversation(conversationId);
+  const resultHook = useConversationResult(conversationId);
+  const result = resultHook?.data;
+  const isLoading = resultHook?.isLoading || false;
+  const error = resultHook?.error;
+  const refetch = resultHook?.refetch;
+
+  // Handle navigation back to home
+  const handleGoToHome = React.useCallback(() => {
+    router.replace('../home');
+  }, [router]);
+
+  // Determine the appropriate accent color based on conversation mode
+  const accentColor = React.useMemo(() => {
+    return conversation?.mode === 'mediator' ? '#58BD7D' : 
+           conversation?.mode === 'counselor' ? '#3B71FE' : 
+           colors.primary;
+  }, [conversation?.mode]);
 
   // Validate conversation ID
   if (!conversationId) {
@@ -23,33 +43,13 @@ export default function Results() {
           <Text style={styles.errorMessage}>Unable to load conversation results</Text>
           <Button 
             title="Go Home" 
-            onPress={() => router.replace('../home')}
+            onPress={handleGoToHome}
             variant="primary"
           />
         </View>
       </Container>
     );
   }
-
-  // Get conversation details and results
-  const { conversation, isLoading: conversationLoading } = useConversation(conversationId);
-  const resultHook = useConversationResult(conversationId);
-  const result = resultHook?.data;
-  const isLoading = resultHook?.isLoading || false;
-  const error = resultHook?.error;
-  const refetch = resultHook?.refetch;
-
-  // Determine the appropriate accent color based on conversation mode
-  const accentColor = conversation?.mode === 'mediator' ? '#58BD7D' : 
-                     conversation?.mode === 'counselor' ? '#3B71FE' : 
-                     colors.primary;
-  
-  // Handle navigation back to home
-  const handleGoToHome = () => {
-    router.replace('../home');
-  };
-  
-  // This block is now placed earlier in the component
 
   return (
     <Container withSafeArea>
@@ -58,8 +58,6 @@ export default function Results() {
         showBackButton 
         onBackPress={handleGoToHome} 
       />
-      
-      {/* This section is now handled in the conditional rendering above */}
       
       {!result || result.status !== 'processing' ? (
         <View style={{ flex: 1 }}>

@@ -27,13 +27,13 @@ export const countUserConversationsThisWeek = async (userId: string): Promise<nu
     const weekStart = getCurrentWeekStart();
     
     // First check if the user exists
-    const userResult = await query<{ exists: number }>(
-      `SELECT 1 as exists FROM users WHERE id = ? LIMIT 1`,
+    const userResult = await query<{ user_exists: number }>(
+      `SELECT 1 as user_exists FROM users WHERE id = ? LIMIT 1`,
       [userId]
     );
     
     // If user doesn't exist in our database, they have 0 conversations
-    if (!userResult[0]) {
+    if (!userResult[0] || !userResult[0].user_exists) {
       logger.warn(`Attempted to count conversations for non-existent user: ${userId}`);
       return 0;
     }
