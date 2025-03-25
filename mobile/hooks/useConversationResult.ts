@@ -42,12 +42,17 @@ export const useConversationResult = (conversationId: string) => {
         console.log('Attempting to subscribe to conversation:', conversationId);
       }
       
-      // Subscribe regardless of current socket state - the subscribe function
-      // will handle reconnection internally if needed
-      subscribeToConversation(conversationId);
-      isSubscribed.current = true;
-      lastAttemptTime.current = Date.now();
-      return true;
+      try {
+        // Subscribe regardless of current socket state - the subscribe function
+        // will handle reconnection internally if needed
+        subscribeToConversation(conversationId);
+        isSubscribed.current = true;
+        lastAttemptTime.current = Date.now();
+        return true;
+      } catch (error) {
+        console.error('Error subscribing to conversation:', error);
+        return false;
+      }
     };
 
     // Set up a periodic health check to ensure subscription is active

@@ -94,15 +94,22 @@ export default function Results() {
       )}
       
       {result?.status !== 'processing' && (
-        <ResultsView
-          isLoading={isLoading || conversationLoading}
-          result={result || null}
-          error={error?.message || result?.error || null}
-          accentColor={accentColor}
-          onNewConversation={handleGoToHome}
-          onRetry={() => refetch()}
-          progress={result?.progress || 0}
-        />
+        <View style={{ flex: 1 }}>
+          <ResultsView
+            isLoading={isLoading || conversationLoading}
+            result={result?.status === 'completed' ? {
+              status: 'completed',
+              summary: result.analysis || '',
+              recommendations: [],
+              progress: 100
+            } : null}
+            error={error?.message || result?.error || null}
+            accentColor={accentColor}
+            onNewConversation={handleGoToHome}
+            onRetry={() => refetch()}
+            progress={result?.progress || 0}
+          />
+        </View>
       )}
     </Container>
   );

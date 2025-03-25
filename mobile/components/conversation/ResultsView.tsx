@@ -46,6 +46,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   onRetry,
   testID,
 }) => {
+  // Handle loading state
   if (isLoading) {
     return (
       <LoadingView
@@ -56,20 +57,23 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     );
   }
 
+  // Handle error state
   if (error) {
     return (
       <ErrorView
         message={error}
         onRetry={onRetry}
+        onNewConversation={onNewConversation}
         testID={testID}
       />
     );
   }
 
+  // Handle missing results
   if (!result) {
     return (
       <ErrorView
-        message="No analysis results available."
+        message="No analysis results available. Please try starting a new conversation."
         title="No Results"
         icon="document-outline"
         iconColor="#64748b"

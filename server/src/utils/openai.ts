@@ -40,11 +40,19 @@ const getMimeType = (extension: string): string => {
  * @param filePath Path to the audio file
  * @returns The transcribed text or an error
  */
-export const transcribeAudio = async (filePath: string): Promise<Result<string>> => {
+export const transcribeAudio = async (filePath: string): Promise<string> => {
   try {
     logger.info(`Transcribing audio file: ${filePath}`);
     
+    // Read the file
     const fileBuffer = await readFile(filePath);
+      
+    if (fileBuffer.length === 0) {
+      throw new Error(`Audio file is empty: ${filePath}`);
+    }
+    
+    logger.info(`Successfully read audio file: ${filePath} (${fileBuffer.length} bytes)`);
+    
     const fileExtension = filePath.split('.').pop()?.toLowerCase() || 'webm';
     const fileName = `audio.${fileExtension}`;
     const mimeType = getMimeType(fileExtension);
@@ -53,10 +61,7 @@ export const transcribeAudio = async (filePath: string): Promise<Result<string>>
     const fileSizeInMB = fileBuffer.length / (1024 * 1024);
     if (fileSizeInMB > 25) {
       logger.warn(`Audio file too large (${fileSizeInMB.toFixed(2)}MB), maximum size is 25MB`);
-      return { 
-        success: false, 
-        error: new ExternalServiceError('Audio file exceeds maximum size of 25MB')
-      };
+      throw new Error('Audio file exceeds maximum size of 25MB');
     }
     
     const file = new File([fileBuffer], fileName, { type: mimeType });
@@ -64,31 +69,26 @@ export const transcribeAudio = async (filePath: string): Promise<Result<string>>
     // Add timeout and retry logic
     const response = await openai.audio.transcriptions.create({
       file,
-      model: 'gpt-4o-mini-transcribe',
+      model: 'whisper-1',
       response_format: 'text',
       temperature: 0.2, // Lower temperature for more accurate transcription
     });
     
-    logger.info(`Transcription completed: ${filePath}`);
-    return { success: true, data: response.text };
+    if (!response.text) {
+      throw new Error('OpenAI returned empty transcription');
+    }
+    
+    logger.info(`Transcription completed for ${filePath}: ${response.text.substring(0, 50)}...`);
+    return response.text;
   } catch (error) {
     // Handle specific OpenAI errors
     if (error instanceof OpenAI.APIError) {
       logger.error(`OpenAI API Error (${error.status}): ${error.message}`);
-      return {
-        success: false,
-        error: new ExternalServiceError(
-          `Transcription failed: ${error.message}`,
-          'OpenAI'
-        )
-      };
+      throw new Error(`Transcription failed: ${error.message}`);
     }
     
     logger.error(`Transcription failed: ${formatError(error)}`);
-    return {
-      success: false,
-      error: new ExternalServiceError('Failed to transcribe audio', 'OpenAI')
-    };
+    throw error;
   }
 };
 
