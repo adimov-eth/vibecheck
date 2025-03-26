@@ -1,6 +1,6 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useStore from '../state/index';
-import type { WebSocketMessage } from '../state/types';
+import type { AnalysisMessage, AudioMessage, ErrorMessage, StatusMessage, TranscriptMessage, WebSocketMessage } from '../state/types';
 
 interface ConversationResult {
   transcript?: string;
@@ -10,15 +10,25 @@ interface ConversationResult {
   progress: number;
 }
 
+interface ConversationPayload {
+  id: string;
+}
+
+interface BaseMessagePayload {
+  conversationId?: string;
+  conversation?: ConversationPayload;
+}
+
 export const useConversationResult = (conversationId: string) => {
   const [data, setData] = useState<ConversationResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   
-  // Use refs to track subscription status and component mount state
+  // Move all refs to the top level
   const isSubscribed = useRef(false);
   const lastAttemptTime = useRef(0);
   const mounted = useRef(true);
+  const checkInterval = useRef<NodeJS.Timeout | null>(null);
 
   const {
     wsMessages,
@@ -32,7 +42,6 @@ export const useConversationResult = (conversationId: string) => {
 
   useEffect(() => {
     mounted.current = true;
-    const checkInterval = useRef<NodeJS.Timeout | null>(null);
 
     // Attempt to subscribe and return success status
     const attemptSubscription = () => {
@@ -44,8 +53,6 @@ export const useConversationResult = (conversationId: string) => {
       }
       
       try {
-        // Subscribe regardless of current socket state - the subscribe function
-        // will handle reconnection internally if needed
         subscribeToConversation(conversationId);
         isSubscribed.current = true;
         lastAttemptTime.current = Date.now();
@@ -65,7 +72,7 @@ export const useConversationResult = (conversationId: string) => {
       
       // Check connection every 15 seconds
       checkInterval.current = setInterval(() => {
-        if (!mounted) return;
+        if (!mounted.current) return;
         
         const now = Date.now();
         const timeSinceLastAttempt = now - lastAttemptTime.current;
@@ -82,10 +89,13 @@ export const useConversationResult = (conversationId: string) => {
         // If we've been connected for at least 5 seconds but haven't received messages
         // for this conversation, try re-subscribing
         if (socket?.readyState === WebSocket.OPEN && timeSinceLastAttempt > 5000) {
-          const hasRelevantMessages = wsMessages.some(
-            msg => (msg.payload.conversationId === conversationId) || 
-                   (msg.payload.conversation && msg.payload.conversation.id === conversationId)
-          );
+          const hasRelevantMessages = wsMessages.some(msg => {
+            const payload = msg.payload as BaseMessagePayload;
+            if (!payload) return false;
+            
+            return payload.conversationId === conversationId || 
+                   (payload.conversation?.id === conversationId);
+          });
           
           if (!hasRelevantMessages && isSubscribed.current) {
             if (__DEV__) {

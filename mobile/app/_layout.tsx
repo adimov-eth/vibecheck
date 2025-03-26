@@ -47,22 +47,25 @@ const NavigationLayout = () => {
   }
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: "#FFFFFF" },
-      }}
-    >
-      <Stack.Screen name="(main)" options={{ headerShown: false }} />
-      <Stack.Screen 
-        name="(auth)" 
-        options={{ 
+    <>
+      <Stack
+        screenOptions={{
           headerShown: false,
-          presentation: 'modal'
-        }} 
-      />
-      <Stack.Screen name="index" options={{ headerShown: false }} />
-    </Stack>
+          contentStyle: { backgroundColor: "#FFFFFF" },
+        }}
+      >
+        <Stack.Screen name="(main)" options={{ headerShown: false }} />
+        <Stack.Screen 
+          name="(auth)" 
+          options={{ 
+            headerShown: false,
+            presentation: 'modal'
+          }} 
+        />
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+      </Stack>
+      <ErrorDisplay />
+    </>
   );
 };
 
@@ -76,7 +79,6 @@ export default function RootLayout() {
         <StatusBar style="auto" />
         <View style={{ flex: 1 }}>
           <NavigationLayout />
-          <ErrorDisplay />
           <ToastProvider />
         </View>
       </SafeAreaProvider>

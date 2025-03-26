@@ -1,11 +1,13 @@
 // components/ErrorDisplay.tsx
 import { showToast } from '@/components/ui/Toast';
 import useStore from '@/state';
-import { useEffect } from 'react';
+import { ErrorMessage } from '@/state/types';
+import React, { useEffect } from 'react';
 
-const ErrorDisplay = () => {
+const ErrorDisplay: React.FC = () => {
   const wsMessages = useStore((state) => state.wsMessages);
-  const latestError = wsMessages[wsMessages.length - 1]?.type === 'error' ? wsMessages[wsMessages.length - 1].payload.error : null;
+  const latestMessage = wsMessages[wsMessages.length - 1];
+  const latestError = latestMessage?.type === 'error' ? (latestMessage as ErrorMessage).payload.error : null;
 
   useEffect(() => {
     if (latestError) {
