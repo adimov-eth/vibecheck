@@ -1,6 +1,7 @@
 import { ErrorMessage } from "@/components/feedback/ErrorMessage";
 import { FormField } from "@/components/forms/FormField";
 import { PasswordInput } from "@/components/forms/PasswordInput";
+import { AppleAuthButton } from "@/components/forms/AppleAuthButton";
 import { Container } from "@/components/layout/Container";
 import { Button } from "@/components/ui/Button";
 import { showToast } from "@/components/ui/Toast";
@@ -12,6 +13,7 @@ import { Link, useRouter } from "expo-router";
 import React, { useState } from "react";
 import { Controller, SubmitHandler, useForm } from "react-hook-form";
 import { StyleSheet, Text, View } from "react-native";
+import * as SecureStore from 'expo-secure-store';
 
 export default function SignUp() {
   const router = useRouter();

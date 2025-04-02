@@ -1,9 +1,9 @@
 // src/utils/websocket.ts
+import type { WebSocketMessage } from '@/types/websocket';
 import { IncomingMessage, Server } from 'http';
 import type { Socket } from 'net';
 import { WebSocket, WebSocketServer } from 'ws';
 import { logger } from './logger';
-import { WebSocketMessage, MessageType } from '@/types/websocket';
 
 interface WebSocketClient extends WebSocket {
   userId: string;
@@ -11,16 +11,27 @@ interface WebSocketClient extends WebSocket {
   subscribedTopics: Set<string>;
 }
 
+interface BufferedMessage {
+  topic: string;
+  userId: string;
+  data: WebSocketMessage;
+  timestamp: number;
+}
+
 export class WebSocketManager {
   private wss: WebSocketServer | null = null;
   private clients = new Map<string, Set<WebSocketClient>>();
   private pingInterval: NodeJS.Timer | null = null;
+  private messageBuffer: BufferedMessage[] = [];
+  private readonly maxBufferSize = 100;
+  private readonly messageExpiry = 1000 * 60 * 5; // 5 minutes in milliseconds
 
   public initialize(server: Server, path = '/ws'): void {
     this.wss = new WebSocketServer({ noServer: true });
     logger.info(`WebSocket server initialized on path: ${path}`);
     this.setupConnectionHandler();
     this.startPingInterval();
+    this.startBufferCleanupInterval();
   }
 
   public handleUpgrade(req: IncomingMessage, socket: Socket, head: Buffer, userId: string): void {
@@ -40,14 +51,16 @@ export class WebSocketManager {
       const userId = ws.userId;
       
       // Store client in users map
-      if (!this.clients.get(userId)?.add(ws)) {
-        this.clients.set(userId, new Set([ws]));
+      if (!this.clients.has(userId)) {
+        this.clients.set(userId, new Set());
       }
+      this.clients.get(userId)!.add(ws);
       
       // Mark client as alive for ping/pong mechanism
       ws.isAlive = true;
       
       logger.info(`WebSocket client connected: ${userId}, active connections: ${this.clients.get(userId)?.size || 0}`);
+      logger.info(`Current buffer size for user ${userId}: ${this.messageBuffer.filter(m => m.userId === userId).length}`);
 
       // Handle ping/pong for connection health monitoring
       ws.on('pong', () => {
@@ -72,12 +85,12 @@ export class WebSocketManager {
               timestamp: new Date().toISOString(),
               payload: { 
                 topic: data.topic,
-                activeSubscriptions: Array.from(ws.subscribedTopics) 
+                activeSubscriptions: Array.from(ws.subscribedTopics),
+                bufferedMessageCount: this.messageBuffer.filter(m => m.userId === userId && m.topic === data.topic).length
               }
             }));
             
             // Send any buffered messages for this topic
-            // This helps clients that reconnect receive messages they might have missed
             this.sendBufferedMessages(ws, data.topic);
             
             logger.debug(`Client ${userId} subscriptions: ${Array.from(ws.subscribedTopics).join(', ')}`);
@@ -137,10 +150,49 @@ export class WebSocketManager {
     });
   }
   
-  // Method to send any buffered messages for a topic when a client subscribes
+  // Send any buffered messages for the topic to this specific client
   private sendBufferedMessages(ws: WebSocketClient, topic: string): void {
-    // This would be implemented with a message buffer/cache if needed
-    // Currently we don't buffer messages, but this is where you would add that logic
+    logger.info(`Sending buffered messages for topic ${topic} to user ${ws.userId}`);
+    
+    const now = Date.now();
+    let sentCount = 0;
+    let skippedCount = 0;
+    
+    // Find buffered messages for this user and topic
+    const relevantMessages = this.messageBuffer
+      .filter(msg => msg.userId === ws.userId && msg.topic === topic && (now - msg.timestamp) < this.messageExpiry);
+
+    // Sort messages by timestamp to maintain order
+    relevantMessages
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .forEach(msg => {
+        try {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(msg.data));
+            sentCount++;
+            
+            // Remove sent message from buffer
+            const index = this.messageBuffer.indexOf(msg);
+            if (index > -1) {
+              this.messageBuffer.splice(index, 1);
+            }
+          } else {
+            skippedCount++;
+          }
+        } catch (error) {
+          logger.error(`Error sending buffered message: ${error}`);
+          skippedCount++;
+        }
+      });
+    
+    logger.info(`Buffered message delivery report for user ${ws.userId}, topic ${topic}:`);
+    logger.info(`- Sent: ${sentCount}`);
+    logger.info(`- Skipped: ${skippedCount}`);
+    logger.info(`- Remaining in buffer: ${this.messageBuffer.length}`);
+    
+    if (sentCount === 0 && relevantMessages.length > 0) {
+      logger.warn(`Failed to deliver any buffered messages for topic ${topic} to user ${ws.userId}`);
+    }
   }
 
   private startPingInterval(): void {
@@ -167,6 +219,24 @@ export class WebSocketManager {
         }
       });
     }, 30000); // Ping every 30 seconds
+  }
+
+  // Clean up expired messages from buffer
+  private startBufferCleanupInterval(): void {
+    setInterval(() => {
+      const initialCount = this.messageBuffer.length;
+      const now = Date.now();
+      
+      // Remove expired messages
+      this.messageBuffer = this.messageBuffer.filter(
+        msg => (now - msg.timestamp) < this.messageExpiry
+      );
+      
+      const removedCount = initialCount - this.messageBuffer.length;
+      if (removedCount > 0) {
+        logger.debug(`Removed ${removedCount} expired messages from buffer`);
+      }
+    }, 60000); // Clean up every minute
   }
 
   public sendToUser(userId: string, data: WebSocketMessage): void {
@@ -200,8 +270,8 @@ export class WebSocketManager {
     
     if (!userClients || userClients.size === 0) {
       logger.warn(`No connected clients found for user ${userId}`);
-      // In a future implementation, we would buffer this message for later delivery
-      // Currently, we just log the missed message
+      // Buffer the message for later delivery
+      this.bufferMessage(userId, topic, data);
       return;
     }
     
@@ -230,7 +300,31 @@ export class WebSocketManager {
       }
     });
     
+    if (sentCount === 0) {
+      // If we couldn't send to any clients, buffer the message
+      this.bufferMessage(userId, topic, data);
+    }
+    
     logger.debug(`Message delivery report for topic ${topic}: sent=${sentCount}, not subscribed=${notSubscribedCount}, closed=${closedCount}, total clients=${userClients.size}`);
+  }
+
+  private bufferMessage(userId: string, topic: string, data: WebSocketMessage): void {
+    // Add the message to the buffer with a timestamp
+    this.messageBuffer.push({
+      userId,
+      topic,
+      data,
+      timestamp: Date.now()
+    });
+    
+    // If the buffer exceeds its maximum size, remove the oldest messages
+    if (this.messageBuffer.length > this.maxBufferSize) {
+      const overflow = this.messageBuffer.length - this.maxBufferSize;
+      this.messageBuffer.splice(0, overflow);
+      logger.debug(`Message buffer overflow, removed ${overflow} oldest messages`);
+    }
+    
+    logger.debug(`Buffered message for user ${userId} and topic ${topic}, buffer size: ${this.messageBuffer.length}`);
   }
 
   public broadcast(data: WebSocketMessage): void {

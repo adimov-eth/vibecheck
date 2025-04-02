@@ -12,7 +12,8 @@
     "ios": {
       "jsEngine": "jsc",
       "supportsTablet": true,
-      "bundleIdentifier": "com.adimov.vibecheck"
+      "bundleIdentifier": "com.adimov.vibecheck",
+      "usesAppleSignIn": true
     },
     "android": {
       "adaptiveIcon": {
@@ -33,6 +34,7 @@
     "plugins": [
       "react-native-iap",
       "expo-router",
+      "expo-apple-authentication",
       [
         "expo-splash-screen",
         {

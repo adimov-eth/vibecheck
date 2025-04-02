@@ -152,6 +152,7 @@ export const useConversationResult = (conversationId: string) => {
     // Only log in development mode
     if (__DEV__) {
       console.log('Processing messages for conversation:', conversationId);
+      console.log('wsMessages:', wsMessages);
     }
     
     try {

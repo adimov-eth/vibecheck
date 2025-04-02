@@ -3,5 +3,5 @@ export * from './useConversationResult';
 export * from './useRecordingFlow';
 export * from './useUsage';
 export * from './useWebSocket';
-
+export * from './useAuthentication';
 

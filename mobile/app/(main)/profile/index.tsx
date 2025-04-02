@@ -2,15 +2,14 @@ import { AppBar } from '@/components/layout/AppBar';
 import { Button } from '@/components/ui/Button';
 import { colors, layout, spacing, typography } from '@/constants/styles';
 import { useUsage } from '@/hooks/useUsage';
-import { useAuth, useUser } from '@clerk/clerk-expo';
+import { useAuthentication } from '@/hooks/useAuthentication';
 import { useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
 import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
 
 export default function Profile() {
   const router = useRouter();
-  const { user } = useUser();
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuthentication();
   const { 
     subscriptionStatus,
     usageStats,
@@ -22,11 +21,9 @@ export default function Profile() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Only fetch if we don't have the data already
+        // Only fetch subscription data if we don't have it already
         if (!subscriptionStatus || !usageStats) {
-          await Promise.all([
-            loadData()
-          ]);
+          await loadData();
         }
       } catch (err) {
         console.error('[Profile] Failed to fetch data:', err);
@@ -37,8 +34,13 @@ export default function Profile() {
   }, []); // Only run on mount
 
   const handleBackPress = () => router.back();
-  const handleSignOut = async () => await signOut();
-  const navigateToUpdatePassword = () => router.push('./update-password');
+  
+  const navigateToUpdatePassword = () => {
+    // For Apple Auth, we don't use passwords, but you could redirect
+    // to Apple's account management page or just remove this option
+    alert('Password management is handled by Apple');
+  };
+  
   const navigateToPaywall = () => router.push('./paywall');
 
   const isSubscribed = subscriptionStatus?.isActive ?? false;
@@ -119,11 +121,11 @@ export default function Profile() {
         <View style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
             <Text style={styles.avatarText}>
-              {user?.firstName?.[0] || user?.emailAddresses?.[0]?.emailAddress?.[0] || '?'}
+              {user?.name?.[0] || user?.email?.[0] || '?'}
             </Text>
           </View>
-          <Text style={styles.userName}>{user?.firstName || 'User'}</Text>
-          <Text style={styles.userEmail}>{user?.emailAddresses?.[0]?.emailAddress}</Text>
+          <Text style={styles.userName}>{user?.name || 'User'}</Text>
+          <Text style={styles.userEmail}>{user?.email}</Text>
         </View>
 
         <View style={styles.section}>
@@ -186,15 +188,15 @@ export default function Profile() {
           <Text style={styles.sectionTitle}>Account Settings</Text>
           <View style={styles.card}>
             <Button
-              title="Update Password"
-              onPress={navigateToUpdatePassword}
+              title="Manage Apple ID"
+              onPress={() => alert('To manage your Apple ID, go to Settings > Apple ID')}
               variant="outline"
-              leftIcon="lock-closed-outline"
+              leftIcon="person-outline"
               style={styles.button}
             />
             <Button
               title="Sign Out"
-              onPress={handleSignOut}
+              onPress={signOut}
               variant="primary"
               leftIcon="log-out-outline"
               style={styles.button}

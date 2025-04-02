@@ -3,6 +3,7 @@ import { formatError } from '@/utils/error-formatter';
 import { query, run, transaction } from '../database';
 import type { User } from '../types';
 import type { Result } from '@/types/common';
+import { verifyAppleToken } from '@/utils/apple-auth';
 
 /**
  * Get a user by ID
@@ -113,5 +114,64 @@ export const sendWelcomeEmail = async (userId: string, email: string): Promise<R
   } catch (error) {
     logger.error(`Error queueing welcome email: ${formatError(error)}`);
     return { success: false, error: error instanceof Error ? error : new Error(String(error)) };
+  }
+};
+
+/**
+ * Authenticate with Apple ID token
+ * @param identityToken The ID token from Apple Sign In
+ * @param name Optional user name provided by Apple (only on first sign-in)
+ * @returns Result object with user data if authentication is successful
+ */
+export const authenticateWithApple = async (
+  identityToken: string,
+  name?: string
+): Promise<Result<User>> => {
+  try {
+    // Verify Apple token
+    const verificationResult = await verifyAppleToken(identityToken);
+    if (!verificationResult.success) {
+      logger.error(`Apple token verification failed: ${verificationResult.error.message}`);
+      return { success: false, error: verificationResult.error };
+    }
+
+    const { userId, email } = verificationResult.data;
+    
+    if (!email) {
+      logger.error(`Apple authentication failed: No email provided in token`);
+      return { 
+        success: false, 
+        error: new Error('Authentication requires an email address') 
+      };
+    }
+
+    // Create or update user record
+    const upsertResult = await upsertUser({
+      id: `apple:${userId}`, // Prefix with 'apple:' to distinguish from other auth methods
+      email,
+      name
+    });
+
+    if (!upsertResult.success) {
+      return { success: false, error: upsertResult.error };
+    }
+
+    // Fetch the user to return
+    const user = await getUser(`apple:${userId}`);
+    if (!user) {
+      return { 
+        success: false, 
+        error: new Error('Failed to create or retrieve user account') 
+      };
+    }
+
+    logger.info(`User authenticated with Apple: ${user.id}`);
+    return { success: true, data: user };
+  } catch (error) {
+    logger.error(`Error in Apple authentication: ${formatError(error)}`);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error : new Error(String(error)) 
+    };
   }
 };

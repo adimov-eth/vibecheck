@@ -1,7 +1,7 @@
 import { authenticate } from '@/middleware/auth';
 import { NotFoundError } from '@/middleware/error';
 import { getUserUsageStats } from '@/services/usage-service';
-import { getUser, upsertUser } from '@/services/user-service';
+import { getUser, upsertUser, authenticateWithApple } from '@/services/user-service';
 import { logger } from '@/utils/logger';
 import { asyncHandler } from '@/utils/async-handler';
 import { formatError } from '@/utils/error-formatter';
@@ -80,7 +80,66 @@ const getCurrentUser: RequestHandler = async (req, res) => {
   }
 };
 
+/**
+ * Apple Sign In authentication
+ * POST /api/user/apple-auth
+ */
+const appleAuth: RequestHandler = async (req, res) => {
+  const { identityToken, fullName } = req.body;
+  
+  if (!identityToken) {
+    return res.status(400).json({
+      success: false,
+      error: 'Identity token is required'
+    });
+  }
+  
+  // Format name if provided
+  let formattedName;
+  if (fullName?.givenName && fullName?.familyName) {
+    formattedName = `${fullName.givenName} ${fullName.familyName}`;
+  }
+  
+  try {
+    const authResult = await authenticateWithApple(identityToken, formattedName);
+    
+    if (!authResult.success) {
+      return res.status(401).json({
+        success: false,
+        error: authResult.error.message
+      });
+    }
+    
+    // Get user's usage stats after successful authentication
+    const usageStats = await getUserUsageStats(authResult.data.id);
+    
+    logger.info(`User authenticated successfully with Apple: ${authResult.data.id}`);
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          ...authResult.data,
+          usage: {
+            currentUsage: usageStats.currentUsage,
+            limit: usageStats.limit,
+            isSubscribed: usageStats.isSubscribed,
+            remainingConversations: usageStats.remainingConversations,
+            resetDate: usageStats.resetDate
+          }
+        }
+      }
+    });
+  } catch (error) {
+    logger.error(`Error in Apple authentication: ${formatError(error)}`);
+    return res.status(500).json({
+      success: false,
+      error: 'Authentication failed'
+    });
+  }
+};
+
 // Define routes with middleware
 router.get('/me', authenticate, asyncHandler(getCurrentUser));
+router.post('/apple-auth', asyncHandler(appleAuth));
 
 export default router;

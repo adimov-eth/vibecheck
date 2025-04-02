@@ -1,9 +1,9 @@
 // state/slices/websocketSlice.ts
 import { getClerkInstance } from '@clerk/clerk-expo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StateCreator } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { StoreState, WS_URL, WebSocketMessage } from '../types';
-
 interface WebSocketState {
   socket: WebSocket | null;
   wsMessages: WebSocketMessage[];
@@ -17,8 +17,8 @@ interface WebSocketState {
 interface WebSocketActions {
   calculateBackoff: () => number;
   connectWebSocket: () => Promise<void>;
-  subscribeToConversation: (conversationId: string) => void;
-  unsubscribeFromConversation: (conversationId: string) => void;
+  subscribeToConversation: (conversationId: string) => Promise<void>;
+  unsubscribeFromConversation: (conversationId: string) => Promise<void>;
   clearMessages: () => void;
 }
 
@@ -165,7 +165,7 @@ export const createWebSocketSlice: StateCreator<
         }
       }, 15000);
 
-      ws.onopen = () => {
+      ws.onopen = async () => {
         clearTimeout(connectionTimeout);
         console.log('WebSocket Connected');
         
@@ -176,33 +176,22 @@ export const createWebSocketSlice: StateCreator<
         });
 
         // Re-subscribe to any existing subscriptions from AsyncStorage
-        // This helps restore state after a reconnection
         try {
-          // Note: We're safely handling this async operation in a sync callback
-          // In a future update, we should refactor to use proper async/await pattern
-          // For now, we'll initialize subscriptions when AsyncStorage resolves
-          import('react-native').then(({ AsyncStorage }) => {
-            AsyncStorage.getItem('websocket_subscriptions')
-              .then(storedTopics => {
-                if (storedTopics) {
-                  const topics = JSON.parse(storedTopics) as string[];
-                  topics.forEach(topic => {
-                    const conversationId = topic.split(':')[1];
-                    if (conversationId) {
-                      get().subscribeToConversation(conversationId);
-                    }
-                  });
-                  if (__DEV__) {
-                    console.log('Restored subscriptions after reconnect:', topics);
-                  }
-                }
-              })
-              .catch(e => {
-                console.error('Failed to restore subscriptions:', e);
-              });
-          });
-        } catch (e) {
-          console.error('Failed to import AsyncStorage:', e);
+          const storedTopics = await AsyncStorage.getItem('websocket_subscriptions');
+          if (storedTopics) {
+            const topics = JSON.parse(storedTopics) as string[];
+            topics.forEach(topic => {
+              const conversationId = topic.split(':')[1];
+              if (conversationId) {
+                get().subscribeToConversation(conversationId);
+              }
+            });
+            if (__DEV__) {
+              console.log('Restored subscriptions after reconnect:', topics);
+            }
+          }
+        } catch (e: unknown) {
+          console.error('Error restoring subscriptions:', e instanceof Error ? e.message : e);
         }
       };
 
@@ -213,13 +202,31 @@ export const createWebSocketSlice: StateCreator<
           // Only log in development environments
           if (__DEV__) {
             console.log('WebSocket message received:', message.type);
+            if (message.type === 'subscription_confirmed') {
+              console.log('Subscription confirmed with buffer status:', message.payload);
+            }
           }
           
           set((state) => {
             // Keep up to 100 messages, prioritizing messages with conversation payloads
-            const keepMessages = state.wsMessages.filter(msg => 
-              msg.payload.conversationId || (msg.payload.conversation && msg.payload.conversation.id)
-            ).slice(-90);
+            const keepMessages = state.wsMessages
+              .filter((msg: WebSocketMessage) => {
+                // Keep all non-control messages for the current session
+                if (msg.type === 'status' || 
+                    msg.type === 'transcript' || 
+                    msg.type === 'analysis' || 
+                    msg.type === 'error') {
+                  return true;
+                }
+                // Filter out control messages older than 5 minutes
+                if (msg.timestamp) {
+                  const msgTime = new Date(msg.timestamp).getTime();
+                  const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+                  return msgTime > fiveMinutesAgo;
+                }
+                return false;
+              })
+              .slice(-90);
             
             state.wsMessages = [...keepMessages, message];
           });
@@ -237,8 +244,8 @@ export const createWebSocketSlice: StateCreator<
           state.isConnecting = false;
         });
 
-        // Always attempt to reconnect unless it was a normal closure
-        if (event.code !== 1000) { // Normal closure
+        // Always attempt to reconnect unless it was a normal closure or auth error
+        if (event.code !== 1000 && event.code !== 1008) { // 1008 is policy violation (often auth)
           const backoffDelay = get().calculateBackoff();
           console.log(
             `Reconnecting in ${backoffDelay}ms (attempt ${get().reconnectAttempts + 1})`
@@ -250,6 +257,8 @@ export const createWebSocketSlice: StateCreator<
             });
             get().connectWebSocket();
           }, backoffDelay);
+        } else if (event.code === 1008) {
+          console.error('Authentication failed, will not auto-reconnect');
         }
       };
 
@@ -272,32 +281,22 @@ export const createWebSocketSlice: StateCreator<
     }
   },
 
-  subscribeToConversation: (conversationId: string) => {
+  subscribeToConversation: async (conversationId: string) => {
     const state = get();
     const socket = state.socket;
     const topic = `conversation:${conversationId}`;
     
     // Store subscription in AsyncStorage for reconnection recovery
     try {
-      import('react-native').then(({ AsyncStorage }) => {
-        AsyncStorage.getItem('websocket_subscriptions')
-          .then(storedTopics => {
-            let topics: string[] = [];
-            
-            if (storedTopics) {
-              topics = JSON.parse(storedTopics);
-            }
-            
-            if (!topics.includes(topic)) {
-              topics.push(topic);
-              AsyncStorage.setItem('websocket_subscriptions', JSON.stringify(topics))
-                .catch(e => console.error('Failed to save subscription:', e));
-            }
-          })
-          .catch(e => console.error('Failed to read subscriptions:', e));
-      });
-    } catch (e) {
-      console.error('Failed to store subscription:', e);
+      const storedTopics = await AsyncStorage.getItem('websocket_subscriptions');
+      let topics: string[] = storedTopics ? JSON.parse(storedTopics) : [];
+      
+      if (!topics.includes(topic)) {
+        topics.push(topic);
+        await AsyncStorage.setItem('websocket_subscriptions', JSON.stringify(topics));
+      }
+    } catch (e: unknown) {
+      console.error('Failed to store subscription:', e instanceof Error ? e.message : e);
     }
     
     // Send subscription message if socket is open
@@ -318,27 +317,21 @@ export const createWebSocketSlice: StateCreator<
     }
   },
 
-  unsubscribeFromConversation: (conversationId: string) => {
+  unsubscribeFromConversation: async (conversationId: string) => {
     const state = get();
     const socket = state.socket;
     const topic = `conversation:${conversationId}`;
     
     // Remove subscription from AsyncStorage
     try {
-      import('react-native').then(({ AsyncStorage }) => {
-        AsyncStorage.getItem('websocket_subscriptions')
-          .then(storedTopics => {
-            if (storedTopics) {
-              let topics: string[] = JSON.parse(storedTopics);
-              topics = topics.filter(t => t !== topic);
-              AsyncStorage.setItem('websocket_subscriptions', JSON.stringify(topics))
-                .catch(e => console.error('Failed to update subscriptions after removal:', e));
-            }
-          })
-          .catch(e => console.error('Failed to read subscriptions for removal:', e));
-      });
-    } catch (e) {
-      console.error('Failed to remove subscription:', e);
+      const storedTopics = await AsyncStorage.getItem('websocket_subscriptions');
+      if (storedTopics) {
+        let topics: string[] = JSON.parse(storedTopics);
+        topics = topics.filter(t => t !== topic);
+        await AsyncStorage.setItem('websocket_subscriptions', JSON.stringify(topics));
+      }
+    } catch (e: unknown) {
+      console.error('Failed to remove subscription:', e instanceof Error ? e.message : e);
     }
     
     // Send unsubscribe message if socket is open
