@@ -1,0 +1,37 @@
+{
+    "apps": [
+      {
+        "name": "vibecheck-server",
+        "script": "bun",
+        "args": "src/index.ts",
+        "env": {
+          "NODE_ENV": "production",
+          "PORT": "3001"
+        }
+      },
+      {
+        "name": "vibecheck-audio-worker",
+        "script": "bun",
+        "args": "src/workers/audio-worker.ts",
+        "env": {
+          "NODE_ENV": "production"
+        }
+      },
+      {
+        "name": "vibecheck-gpt-worker",
+        "script": "bun",
+        "args": "src/workers/gpt-worker.ts",
+        "env": {
+          "NODE_ENV": "production"
+        }
+      },
+      {
+        "name": "vibecheck-notification-worker",
+        "script": "bun",
+        "args": "src/workers/notification-worker.ts",
+        "env": {
+          "NODE_ENV": "production"
+        }
+      }
+    ]
+  }

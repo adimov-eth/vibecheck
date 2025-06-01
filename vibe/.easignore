@@ -1,0 +1,10 @@
+# Ignore files and directories that EAS Build doesn't need to build your app
+/docs/
+node_modules/
+.git/
+.vscode/
+.idea/
+.expo/
+dist/
+web-build/
+coverage/
