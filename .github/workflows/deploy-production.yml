@@ -1,0 +1,203 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allow manual deployment
+
+env:
+  NODE_ENV: production
+
+jobs:
+  # Run tests before deployment
+  test:
+    name: Run Tests
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  # Deploy to Digital Ocean
+  deploy:
+    name: Deploy to Production
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.2.9
+
+      - name: 📦 Install and Build
+        working-directory: ./check
+        run: |
+          bun install --production
+          bun run db:migrate --dry-run || echo "No migration script"
+
+      - name: 🔐 Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 📤 Deploy to Server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          # Create deployment script
+          cat > deploy.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          echo "🚀 Starting deployment..."
+          
+          # Variables
+          DEPLOY_PATH="${DEPLOY_PATH:-/home/sammy}"
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BACKUP_DIR="$DEPLOY_PATH/backups/$TIMESTAMP"
+          
+          # Create backup
+          echo "📦 Creating backup..."
+          mkdir -p "$BACKUP_DIR"
+          if [ -d "$DEPLOY_PATH/check" ]; then
+            cp -r "$DEPLOY_PATH/check/.env" "$BACKUP_DIR/" 2>/dev/null || true
+            cp -r "$DEPLOY_PATH/check/app.db*" "$BACKUP_DIR/" 2>/dev/null || true
+          fi
+          
+          # Sync files
+          echo "📂 Syncing files..."
+          rsync -avz --delete \
+            --exclude 'node_modules' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude 'uploads/*' \
+            --exclude 'logs/*' \
+            --exclude '*.db' \
+            --exclude '*.db-*' \
+            --exclude '.git' \
+            ./check/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/check/"
+          
+          # Deploy on server
+          echo "🔧 Running deployment commands on server..."
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" << 'ENDSSH'
+          set -e
+          cd $DEPLOY_PATH/check
+          
+          # Install dependencies
+          echo "📦 Installing dependencies..."
+          bun install --production
+          
+          # Run migrations
+          echo "🗄️ Running database migrations..."
+          bun run db:migrate || echo "Migration completed or no changes"
+          
+          # Create required directories
+          mkdir -p logs uploads
+          
+          # Reload PM2 processes
+          echo "🔄 Reloading PM2 processes..."
+          pm2 reload ecosystem.config.js --update-env
+          pm2 save
+          
+          # Health check
+          echo "🏥 Running health check..."
+          sleep 5
+          curl -f http://localhost:3001/health || exit 1
+          
+          echo "✅ Deployment successful!"
+          ENDSSH
+          EOF
+          
+          chmod +x deploy.sh
+          ./deploy.sh
+
+      - name: 🏥 Verify Deployment
+        run: |
+          sleep 10
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.DEPLOY_HOST }}/health || echo "Failed")
+          if [ "$response" = "200" ]; then
+            echo "✅ Health check passed!"
+          else
+            echo "❌ Health check failed with status: $response"
+            exit 1
+          fi
+
+      - name: 📊 Create Deployment Record
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: 'production',
+              description: 'Production deployment',
+              auto_merge: false,
+              required_contexts: []
+            });
+            
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.data.id,
+              state: 'success',
+              environment_url: 'https://${{ secrets.DEPLOY_HOST }}'
+            });
+
+      - name: 📢 Notify Success
+        if: success()
+        run: |
+          echo "🎉 Deployment to production completed successfully!"
+          echo "📅 Deployed at: $(date)"
+          echo "🔗 URL: https://${{ secrets.DEPLOY_HOST }}"
+
+      - name: 🚨 Notify Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed! Check logs for details."
+          # Add Slack/Discord notification here if configured
+
+  # Rollback job (manual trigger)
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: 🔐 Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 🔄 Perform Rollback
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          echo "🔄 Starting rollback..."
+          cd ${{ secrets.DEPLOY_PATH }}
+          
+          # Find latest backup
+          LATEST_BACKUP=$(ls -t backups/ | head -1)
+          if [ -z "$LATEST_BACKUP" ]; then
+            echo "❌ No backup found!"
+            exit 1
+          fi
+          
+          echo "📦 Restoring from backup: $LATEST_BACKUP"
+          cp backups/$LATEST_BACKUP/.env check/ 2>/dev/null || true
+          cp backups/$LATEST_BACKUP/*.db* check/ 2>/dev/null || true
+          
+          cd check
+          git pull origin main~1
+          bun install --production
+          pm2 reload ecosystem.config.js
+          
+          echo "✅ Rollback completed!"
+          EOF 

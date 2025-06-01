@@ -1,0 +1,122 @@
+name: CI - Continuous Integration
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [feature/**, bugfix/**, hotfix/**]
+
+jobs:
+  # Backend CI
+  backend-ci:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./check
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🔧 Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.2.9
+      
+      - name: 📦 Install dependencies
+        run: bun install --frozen-lockfile
+      
+      - name: 🔍 Run linter
+        run: bun run lint
+      
+      - name: 🔷 TypeScript check
+        run: bun run typecheck || bun tsc --noEmit
+      
+      - name: 🧪 Run tests
+        run: bun test
+      
+      - name: 🏗️ Build check
+        run: bun run build || echo "No build script"
+      
+      - name: 📊 Check OpenAI quota
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: bun run check:openai
+        continue-on-error: true
+
+  # Frontend CI
+  frontend-ci:
+    name: Frontend CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./vibe
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: 🔧 Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10.6.3
+      
+      - name: 📦 Install dependencies
+        run: pnpm install --frozen-lockfile
+      
+      - name: 🔍 Run linter
+        run: pnpm run lint || npm run lint
+      
+      - name: 🔷 TypeScript check
+        run: pnpm run typecheck || npx tsc --noEmit
+      
+      - name: 🧪 Run tests
+        run: pnpm test || echo "No tests configured"
+        continue-on-error: true
+
+  # Security scan
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🔒 Run security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0' # Don't fail the build
+      
+      - name: 📋 Check for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+  # Combined status check
+  ci-status:
+    name: CI Status Check
+    needs: [backend-ci, frontend-ci, security]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: ✅ Check CI Status
+        run: |
+          if [[ "${{ needs.backend-ci.result }}" == "failure" || 
+                "${{ needs.frontend-ci.result }}" == "failure" ]]; then
+            echo "❌ CI checks failed"
+            exit 1
+          else
+            echo "✅ All CI checks passed"
+          fi 

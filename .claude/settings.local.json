@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp:*)",
+      "Bash(if [ -d check/scripts ]; then mkdir -p packages/server/scripts && cp -R check/scripts/* packages/server/scripts/; fi)",
+      "Bash(mkdir:*)",
+      "Bash(pnpm:*)",
+      "Bash(expo --version)"
+    ],
+    "deny": []
+  }
+}

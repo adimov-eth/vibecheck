@@ -1,0 +1,104 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Database
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Uploads and temporary files
+uploads/
+temp/
+tmp/
+.tmp/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test coverage
+coverage/
+*.lcov
+.nyc_output
+
+# Mobile app specific (React Native/Expo)
+vibe/.expo/
+vibe/.expo-shared/
+vibe/dist/
+vibe/web-build/
+*.orig
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# iOS
+vibe/ios/Pods/
+vibe/ios/build/
+vibe/ios/.xcode.env.local
+
+# Android
+vibe/android/app/build/
+vibe/android/build/
+vibe/android/gradle/
+vibe/android/.gradle/
+vibe/android/local.properties
+
+# Backups
+backups/
+*.backup
+
+# PM2
+.pm2/
+ecosystem.config.js.bak
+
+# OS files
+Thumbs.db
+
+# Bun
+bun.lockb
+.bun/
+
+# Testing
+cypress/videos/
+cypress/screenshots/
+playwright-report/
+test-results/
+
+# Security
+*.pem
+*.key
+*.cert
+*.crt
+private/
+
+# Cache
+.cache/
+.parcel-cache/
+.turbo/ 
