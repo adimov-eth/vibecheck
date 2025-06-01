@@ -97,6 +97,7 @@ test-results/
 *.cert
 *.crt
 private/
+deploy_key*
 
 # Cache
 .cache/
