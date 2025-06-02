@@ -32,13 +32,13 @@ jobs:
         run: bun run lint
       
       - name: 🔷 TypeScript check
-        run: bun run typecheck || bun tsc --noEmit
+        run: bun run typecheck
       
       - name: 🧪 Run tests
-        run: bun test
+        run: bun run test
       
       - name: 🏗️ Build check
-        run: bun run build || echo "No build script"
+        run: bun run build
       
       - name: 📊 Check OpenAI quota
         env:
