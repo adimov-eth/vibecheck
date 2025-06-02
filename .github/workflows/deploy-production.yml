@@ -52,9 +52,17 @@ jobs:
         run: |
           # Setup SSH key
           mkdir -p ~/.ssh
-          # Write key with proper line endings
-          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          # Write key exactly as provided
+          cat > ~/.ssh/deploy_key << 'EOF'
+          ${{ secrets.DEPLOY_KEY }}
+          EOF
           chmod 600 ~/.ssh/deploy_key
+          
+          # Debug key info
+          echo "Key info:"
+          file ~/.ssh/deploy_key
+          echo "Key lines: $(wc -l < ~/.ssh/deploy_key)"
+          echo "Key starts with: $(head -n1 ~/.ssh/deploy_key | cut -c1-30)..."
           
           # Test SSH connection
           echo "Testing SSH connection..."
