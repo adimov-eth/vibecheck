@@ -28,8 +28,16 @@ if [ -n "${CI:-}" ]; then
     scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no /tmp/deploy.tar.gz ${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/
     
     # Execute deployment on server
-    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "zsh -l" << 'ENDSSH'
+    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} << 'ENDSSH'
+        #!/bin/bash
         set -euo pipefail
+        
+        # Source profile to get Bun in PATH
+        source ~/.bashrc 2>/dev/null || true
+        source ~/.profile 2>/dev/null || true
+        
+        # If Bun still not found, add it to PATH
+        export PATH="$HOME/.bun/bin:$PATH"
         
         # Create backup
         echo "📦 Creating backup..."
