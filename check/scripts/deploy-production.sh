@@ -13,18 +13,19 @@ echo "🚀 Starting deployment to ${DEPLOY_HOST}..."
 if [ -n "${CI:-}" ]; then
     echo "📦 Running in CI environment"
     # Create deployment package
-    tar -czf deploy.tar.gz \
+    tar -czf /tmp/deploy.tar.gz \
         --exclude='node_modules' \
         --exclude='*.log' \
         --exclude='uploads/*' \
         --exclude='app.db*' \
         --exclude='.env' \
         --exclude='.git' \
+        --exclude='deploy.tar.gz' \
         .
     
     # Deploy to server
     echo "📤 Uploading to server..."
-    scp -o StrictHostKeyChecking=no deploy.tar.gz ${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/
+    scp -o StrictHostKeyChecking=no /tmp/deploy.tar.gz ${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/
     
     # Execute deployment on server
     ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} << 'ENDSSH'
@@ -68,7 +69,7 @@ if [ -n "${CI:-}" ]; then
 ENDSSH
     
     # Cleanup
-    rm -f deploy.tar.gz
+    rm -f /tmp/deploy.tar.gz
 else
     echo "📦 Running locally - using rsync"
     # Local deployment using rsync
