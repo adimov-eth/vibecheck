@@ -17,7 +17,10 @@
     "queue:clean:audio": "bun src/scripts/clean-queues.ts clean --audio",
     "queue:clean:gpt": "bun src/scripts/clean-queues.ts clean --gpt",
     "queue:drain": "bun src/scripts/clean-queues.ts drain",
-    "queue:restart": "bun src/scripts/clean-queues.ts restart"
+    "queue:restart": "bun src/scripts/clean-queues.ts restart",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'No tests yet'",
+    "build": "echo 'No build required for Bun'"
   },
   "devDependencies": {
     "@eslint/js": "^9.23.0",
