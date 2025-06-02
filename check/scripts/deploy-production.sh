@@ -28,7 +28,7 @@ if [ -n "${CI:-}" ]; then
     scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no /tmp/deploy.tar.gz ${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/
     
     # Execute deployment on server
-    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} << 'ENDSSH'
+    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "zsh -l" << 'ENDSSH'
         set -euo pipefail
         
         # Create backup

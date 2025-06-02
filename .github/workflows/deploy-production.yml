@@ -52,14 +52,13 @@ jobs:
         run: |
           # Setup SSH key
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          # Write key with proper line endings
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           
-          # Debug: Check key format
-          echo "SSH key first line:"
-          head -n1 ~/.ssh/deploy_key
-          echo "SSH key line count:"
-          wc -l ~/.ssh/deploy_key
+          # Test SSH connection
+          echo "Testing SSH connection..."
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "echo 'SSH test successful'" || echo "SSH test failed"
           
           ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
           
