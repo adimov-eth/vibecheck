@@ -85,9 +85,9 @@ jobs:
           
           # Deploy on server
           echo "🔧 Running deployment commands on server..."
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" << 'ENDSSH'
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" << ENDSSH
           set -e
-          cd $DEPLOY_PATH/check
+          cd /home/sammy/check
           
           # Install dependencies
           echo "📦 Installing dependencies..."
@@ -102,7 +102,7 @@ jobs:
           
           # Reload PM2 processes
           echo "🔄 Reloading PM2 processes..."
-          pm2 reload ecosystem.config.js --update-env
+          pm2 reload ecosystem.config.cjs --update-env
           pm2 save
           
           # Health check

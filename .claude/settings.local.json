@@ -5,7 +5,16 @@
       "Bash(if [ -d check/scripts ]; then mkdir -p packages/server/scripts && cp -R check/scripts/* packages/server/scripts/; fi)",
       "Bash(mkdir:*)",
       "Bash(pnpm:*)",
-      "Bash(expo --version)"
+      "Bash(expo --version)",
+      "Bash(ls:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(./scripts/monitor-github-actions.sh:*)",
+      "Bash(grep:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh run list:*)",
+      "Bash(chmod:*)"
     ],
     "deny": []
   }
