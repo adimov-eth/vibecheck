@@ -82,7 +82,6 @@ ecosystem.config.js.bak
 Thumbs.db
 
 # Bun
-bun.lockb
 .bun/
 
 # Testing
