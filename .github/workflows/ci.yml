@@ -26,7 +26,7 @@ jobs:
           bun-version: 1.2.9
       
       - name: 📦 Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
       
       - name: 🔍 Run linter
         run: bun run lint

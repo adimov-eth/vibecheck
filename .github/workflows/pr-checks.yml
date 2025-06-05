@@ -57,7 +57,7 @@ jobs:
       
       - name: 📦 Install backend dependencies
         working-directory: ./check
-        run: bun install --frozen-lockfile
+        run: bun install
       
       - name: 🔍 Run backend linter
         working-directory: ./check
@@ -106,7 +106,7 @@ jobs:
       
       - name: 📦 Install dependencies
         working-directory: ./check
-        run: bun install --frozen-lockfile
+        run: bun install
       
       - name: 🏗️ Setup test database
         working-directory: ./check

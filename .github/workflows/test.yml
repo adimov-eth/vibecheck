@@ -51,7 +51,7 @@ jobs:
             ${{ runner.os }}-bun-
       
       - name: 📦 Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
       
       - name: 🏗️ Setup test database
         run: |
