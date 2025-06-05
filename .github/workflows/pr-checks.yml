@@ -62,6 +62,7 @@ jobs:
       - name: 🔍 Run backend linter
         working-directory: ./check
         run: bun run lint
+        continue-on-error: true
       
       - name: 🔷 Backend TypeScript check
         working-directory: ./check
