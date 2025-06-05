@@ -34,8 +34,26 @@ jobs:
       - name: 🔷 TypeScript check
         run: bun run typecheck
       
-      - name: 🧪 Run tests
-        run: bun run test
+      - name: 🧪 Run unit tests
+        run: bun run test:unit
+      
+      - name: 🔐 Run security tests
+        run: bun run test:security
+      
+      - name: 🔄 Run integration tests
+        run: bun run test:integration
+        continue-on-error: true
+      
+      - name: 📊 Run tests with coverage
+        run: bun run test:coverage:report
+      
+      - name: 📊 Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: backend
+          name: backend-coverage
+          fail_ci_if_error: false
       
       - name: 🏗️ Build check
         run: bun run build

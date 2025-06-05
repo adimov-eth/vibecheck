@@ -1,0 +1,213 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  # Quick checks that should pass before deeper testing
+  quick-checks:
+    name: Quick Checks
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for some checks
+      
+      - name: 🔍 Check PR size
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { additions, deletions } = pr;
+            const total = additions + deletions;
+            
+            if (total > 1000) {
+              core.warning(`Large PR detected: ${total} lines changed. Consider breaking into smaller PRs.`);
+            }
+            
+            console.log(`PR size: +${additions} -${deletions}`);
+      
+      - name: 📝 Check commit messages
+        run: |
+          # Check for conventional commits
+          git log --format="%s" origin/main..HEAD | while read commit; do
+            if ! echo "$commit" | grep -qE "^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?: .+"; then
+              echo "⚠️ Non-conventional commit: $commit"
+            fi
+          done
+
+  # Run linting and type checks
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🔧 Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.2.9
+      
+      - name: 📦 Install backend dependencies
+        working-directory: ./check
+        run: bun install --frozen-lockfile
+      
+      - name: 🔍 Run backend linter
+        working-directory: ./check
+        run: bun run lint
+      
+      - name: 🔷 Backend TypeScript check
+        working-directory: ./check
+        run: bun run typecheck
+      
+      - name: 🔧 Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10.6.3
+      
+      - name: 📦 Install frontend dependencies
+        working-directory: ./vibe
+        run: pnpm install --frozen-lockfile
+      
+      - name: 🔍 Run frontend linter
+        working-directory: ./vibe
+        run: pnpm run lint || npm run lint
+        continue-on-error: true
+      
+      - name: 🔷 Frontend TypeScript check
+        working-directory: ./vibe
+        run: pnpm run typecheck || npx tsc --noEmit
+        continue-on-error: true
+
+  # Run critical tests
+  critical-tests:
+    name: Critical Tests
+    runs-on: ubuntu-latest
+    needs: [quick-checks, code-quality]
+    if: github.event.pull_request.draft == false
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🔧 Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.2.9
+      
+      - name: 📦 Install dependencies
+        working-directory: ./check
+        run: bun install --frozen-lockfile
+      
+      - name: 🏗️ Setup test database
+        working-directory: ./check
+        run: bun run db:migrate
+      
+      - name: 🔐 Run auth tests
+        working-directory: ./check
+        run: bun run test:auth
+      
+      - name: 🛡️ Run security tests
+        working-directory: ./check
+        run: bun run test:security
+      
+      - name: 📊 Generate coverage report
+        working-directory: ./check
+        run: bun run test:coverage:report
+      
+      - name: 📈 Check coverage threshold
+        working-directory: ./check
+        run: |
+          if [ -f "coverage/lcov.info" ]; then
+            total_lines=$(grep -E "^DA:" coverage/lcov.info | wc -l | tr -d ' ')
+            covered_lines=$(grep -E "^DA:[0-9]+,[1-9]" coverage/lcov.info | wc -l | tr -d ' ')
+            
+            if [ "$total_lines" -gt 0 ]; then
+              coverage_percent=$((covered_lines * 100 / total_lines))
+              echo "Coverage: $coverage_percent%"
+              
+              # Warn if coverage is below 40%
+              if [ "$coverage_percent" -lt 40 ]; then
+                echo "⚠️ Coverage is below 40% threshold"
+              fi
+            fi
+          fi
+
+  # PR status check
+  pr-status:
+    name: PR Status Check
+    needs: [quick-checks, code-quality, critical-tests]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: ✅ Check PR Status
+        run: |
+          if [[ "${{ needs.quick-checks.result }}" == "failure" || 
+                "${{ needs.code-quality.result }}" == "failure" ||
+                "${{ needs.critical-tests.result }}" == "failure" ]]; then
+            echo "❌ PR checks failed"
+            exit 1
+          else
+            echo "✅ All PR checks passed"
+          fi
+      
+      - name: 💬 Update PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const quickChecks = '${{ needs.quick-checks.result }}';
+            const codeQuality = '${{ needs.code-quality.result }}';
+            const criticalTests = '${{ needs.critical-tests.result }}';
+            
+            const getEmoji = (status) => {
+              return status === 'success' ? '✅' : status === 'failure' ? '❌' : '⏭️';
+            };
+            
+            const comment = `## PR Check Results
+            
+            | Check | Status |
+            |-------|--------|
+            | Quick Checks | ${getEmoji(quickChecks)} ${quickChecks} |
+            | Code Quality | ${getEmoji(codeQuality)} ${codeQuality} |
+            | Critical Tests | ${getEmoji(criticalTests)} ${criticalTests} |
+            
+            ${quickChecks === 'success' && codeQuality === 'success' && criticalTests === 'success' 
+              ? '🎉 All checks passed! This PR is ready for review.' 
+              : '⚠️ Some checks failed. Please review the details above.'}
+            `;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && comment.body.includes('PR Check Results')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
