@@ -79,8 +79,10 @@ router.post(
 			const userId = (req as AuthenticatedRequest).userId;
 
 			// Validate request body
+			log.debug("Upload request body:", req.body);
 			const validationResult = uploadAudioSchema.safeParse(req.body);
 			if (!validationResult.success) {
+				log.debug("Validation failed:", validationResult.error);
 				return next(
 					new ValidationError(
 						`Invalid request: ${validationResult.error.errors.map((e) => e.message).join(", ")}`,

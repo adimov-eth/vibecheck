@@ -71,6 +71,7 @@ describe('E2E: Conversation Flow', () => {
       const audioBuffer = Buffer.from('fake-audio-data')
       const formData = new FormData()
       formData.append('conversationId', conversation.id)
+      formData.append('audioKey', 'main') // Add required audioKey field
       formData.append('audio', new Blob([audioBuffer], { type: 'audio/webm' }), 'recording.webm')
 
       const uploadResponse = await fetch(`${API_URL}/audio/upload`, {
@@ -81,9 +82,10 @@ describe('E2E: Conversation Flow', () => {
         body: formData
       })
 
-      expect(uploadResponse.status).toBe(200)
+      expect(uploadResponse.status).toBe(201)
       const uploadResult = await uploadResponse.json()
-      expect(uploadResult.message).toContain('uploaded successfully')
+      expect(uploadResult.success).toBe(true)
+      expect(uploadResult.message).toContain('uploaded')
 
       // Step 3: Check conversation status
       const statusResponse = await fetch(`${API_URL}/conversations/${conversation.id}`, {
@@ -155,6 +157,7 @@ describe('E2E: Conversation Flow', () => {
       for (const filename of audioFiles) {
         const formData = new FormData()
         formData.append('conversationId', conversation.id)
+        formData.append('audioKey', filename.replace('.webm', '')) // Use filename without extension as key
         formData.append('audio', new Blob([Buffer.from(`audio-${filename}`)], { type: 'audio/webm' }), filename)
 
         const uploadResponse = await fetch(`${API_URL}/audio/upload`, {
@@ -165,7 +168,7 @@ describe('E2E: Conversation Flow', () => {
           body: formData
         })
 
-        expect(uploadResponse.status).toBe(200)
+        expect(uploadResponse.status).toBe(201)
       }
 
       // Check conversation has all audio files
@@ -269,6 +272,7 @@ describe('E2E: Conversation Flow', () => {
       const largeBuffer = Buffer.alloc(11 * 1024 * 1024)
       const formData = new FormData()
       formData.append('conversationId', conversation.id)
+      formData.append('audioKey', 'large-file-test')
       formData.append('audio', new Blob([largeBuffer], { type: 'audio/webm' }), 'large.webm')
 
       const response = await fetch(`${API_URL}/audio/upload`, {
