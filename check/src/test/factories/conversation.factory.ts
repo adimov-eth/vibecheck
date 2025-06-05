@@ -1,27 +1,25 @@
 import { faker } from '@faker-js/faker';
 import { drizzleDb as database } from '@/database/drizzle';
-import { conversations, audios } from '@/database/schema';
-import type { Conversation } from '@/types';
+import { conversations, type Conversation, type NewConversation } from '@/database/schema';
 
 export class ConversationFactory {
   static build(overrides: Partial<Conversation> = {}): Conversation {
+    const now = Math.floor(Date.now() / 1000);
     return {
       id: faker.string.uuid(),
       userId: faker.string.uuid(),
-      mode: faker.helpers.arrayElement(['therapy', 'coaching', 'interview']),
-      recordingType: faker.helpers.arrayElement(['separate', 'live']),
-      status: faker.helpers.arrayElement(['waiting', 'processing', 'completed', 'failed']),
-      duration: faker.number.int({ min: 60, max: 3600 }),
-      transcript: faker.lorem.paragraphs(3),
-      analysis: {
-        summary: faker.lorem.paragraph(),
-        sentiment: faker.helpers.arrayElement(['positive', 'neutral', 'negative']),
-        mood: faker.helpers.arrayElement(['happy', 'calm', 'anxious', 'sad']),
-        keyPoints: faker.lorem.sentences(3).split('.').filter(s => s.trim()),
-        recommendations: faker.lorem.sentences(2).split('.').filter(s => s.trim())
-      },
-      createdAt: faker.date.past(),
-      updatedAt: faker.date.recent(),
+      mode: faker.helpers.arrayElement(['Interview Practice', 'Presentation Practice', 'Daily Standup']),
+      recordingType: faker.helpers.arrayElement(['separate', 'live']) as 'separate' | 'live',
+      status: faker.helpers.arrayElement(['waiting', 'transcribing', 'analyzing', 'completed', 'error']),
+      gptResponse: faker.datatype.boolean() ? JSON.stringify({
+        communicationStyle: faker.lorem.sentence(),
+        emotionalTone: faker.lorem.word(),
+        keyPoints: [faker.lorem.sentence(), faker.lorem.sentence()],
+        suggestions: [faker.lorem.sentence()]
+      }) : null,
+      errorMessage: null,
+      createdAt: now - 86400, // 1 day ago
+      updatedAt: now,
       ...overrides
     };
   }
@@ -36,9 +34,8 @@ export class ConversationFactory {
         mode: conversation.mode,
         recordingType: conversation.recordingType,
         status: conversation.status,
-        duration: conversation.duration,
-        transcript: conversation.transcript,
-        analysis: conversation.analysis,
+        gptResponse: conversation.gptResponse,
+        errorMessage: conversation.errorMessage,
         createdAt: conversation.createdAt,
         updatedAt: conversation.updatedAt
       })
@@ -51,75 +48,50 @@ export class ConversationFactory {
     return Array.from({ length: count }, () => this.build(overrides));
   }
   
-  static async createMany(
-    count: number, 
-    overrides: Partial<Conversation> = {}
-  ): Promise<Conversation[]> {
-    const conversations = this.buildMany(count, overrides);
+  static async createMany(count: number, overrides: Partial<Conversation> = {}): Promise<Conversation[]> {
+    const conversationsToCreate = this.buildMany(count, overrides);
     const created = await database.insert(conversations)
-      .values(conversations)
+      .values(conversationsToCreate)
       .returning();
     
     return created;
   }
   
-  static async createWithAudios(
-    conversationOverrides: Partial<Conversation> = {},
-    audioCount = 2
-  ): Promise<{
+  static async createWithAudios(audioCount: number = 1, overrides: Partial<Conversation> = {}): Promise<{
     conversation: Conversation;
     audios: any[];
   }> {
-    const conversation = await this.create(conversationOverrides);
+    const conversation = await this.create(overrides);
     
-    const audioData = Array.from({ length: audioCount }, (_, i) => ({
-      id: faker.string.uuid(),
+    // Import AudioFactory here to avoid circular dependency
+    const { AudioFactory } = await import('./audio.factory');
+    
+    const audios = await AudioFactory.createMany(audioCount, {
       conversationId: conversation.id,
-      filePath: `uploads/${conversation.id}/audio${i + 1}.mp3`,
-      duration: faker.number.int({ min: 30, max: 300 }),
-      status: 'completed',
-      transcript: faker.lorem.paragraph(),
-      createdAt: new Date(conversation.createdAt.getTime() + i * 60000),
-      updatedAt: faker.date.recent()
-    }));
+      userId: conversation.userId
+    });
     
-    const createdAudios = await database.insert(audios)
-      .values(audioData)
-      .returning();
-    
-    return { conversation, audios: createdAudios };
+    return { conversation, audios };
   }
   
-  static buildPending(userId: string): Partial<Conversation> {
-    return {
-      userId,
-      status: 'waiting',
-      duration: 0,
-      transcript: null,
-      analysis: null
-    };
+  static buildCompleted(overrides: Partial<Conversation> = {}): Conversation {
+    return this.build({
+      status: 'completed',
+      gptResponse: JSON.stringify({
+        communicationStyle: 'Clear and professional',
+        emotionalTone: 'Confident',
+        keyPoints: ['Good structure', 'Clear delivery'],
+        suggestions: ['Add more examples', 'Vary tone']
+      }),
+      ...overrides
+    });
   }
   
-  static buildCompleted(userId: string): Partial<Conversation> {
-    return {
-      userId,
-      status: 'completed',
-      duration: faker.number.int({ min: 300, max: 1800 }),
-      transcript: faker.lorem.paragraphs(5),
-      analysis: {
-        summary: faker.lorem.paragraph(),
-        sentiment: 'positive',
-        mood: 'calm',
-        keyPoints: [
-          'Key insight about the conversation',
-          'Important topic discussed',
-          'Action item identified'
-        ],
-        recommendations: [
-          'Consider exploring this topic further',
-          'Practice the discussed techniques'
-        ]
-      }
-    };
+  static buildError(overrides: Partial<Conversation> = {}): Conversation {
+    return this.build({
+      status: 'error',
+      errorMessage: 'Transcription failed',
+      ...overrides
+    });
   }
 }

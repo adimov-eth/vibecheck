@@ -105,3 +105,8 @@ app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
 
 // Error handler
 app.use(handleError);
+
+// Export function to create app for testing
+export function createApp() {
+	return app;
+}

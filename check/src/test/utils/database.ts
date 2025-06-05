@@ -13,6 +13,17 @@ export class TestDatabase {
   private static instance: TestDatabase;
   private isInitialized = false;
   
+  // Expose database instance for direct access in tests
+  get db() {
+    return database;
+  }
+  
+  // Convenience methods for direct table access
+  get select() { return database.select.bind(database); }
+  get insert() { return database.insert.bind(database); }
+  get update() { return database.update.bind(database); }
+  get delete() { return database.delete.bind(database); }
+  
   static async getInstance(): Promise<TestDatabase> {
     if (!this.instance) {
       this.instance = new TestDatabase();
