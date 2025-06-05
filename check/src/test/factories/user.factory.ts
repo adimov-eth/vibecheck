@@ -1,17 +1,22 @@
 import { faker } from '@faker-js/faker';
 import { drizzleDb as database } from '@/database/drizzle';
-import { users } from '@/database/schema';
-import type { User } from '@/types';
+import { users, type User } from '@/database/schema';
 
 export class UserFactory {
   static build(overrides: Partial<User> = {}): User {
+    const now = Math.floor(Date.now() / 1000);
     return {
       id: faker.string.uuid(),
       email: faker.internet.email().toLowerCase(),
       name: faker.person.fullName(),
-      appleAccountToken: faker.string.alphanumeric(64),
-      createdAt: faker.date.past(),
-      updatedAt: faker.date.recent(),
+      appAccountToken: faker.string.alphanumeric(64),
+      accountLocked: false,
+      accountLockedAt: null,
+      accountLockReason: null,
+      unlockToken: null,
+      unlockTokenGeneratedAt: null,
+      createdAt: now - 86400, // 1 day ago
+      updatedAt: now,
       ...overrides
     };
   }
@@ -24,7 +29,12 @@ export class UserFactory {
         id: user.id,
         email: user.email,
         name: user.name,
-        appleAccountToken: user.appleAccountToken,
+        appAccountToken: user.appAccountToken,
+        accountLocked: user.accountLocked,
+        accountLockedAt: user.accountLockedAt,
+        accountLockReason: user.accountLockReason,
+        unlockToken: user.unlockToken,
+        unlockTokenGeneratedAt: user.unlockTokenGeneratedAt,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
       })
@@ -38,9 +48,9 @@ export class UserFactory {
   }
   
   static async createMany(count: number, overrides: Partial<User> = {}): Promise<User[]> {
-    const users = this.buildMany(count, overrides);
+    const usersToCreate = this.buildMany(count, overrides);
     const created = await database.insert(users)
-      .values(users)
+      .values(usersToCreate)
       .returning();
     
     return created;
