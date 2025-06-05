@@ -1,0 +1,652 @@
+# Implement Redis Caching Layer
+
+## Priority: HIGH
+## Timeline: Day 4-5 of Week 3
+## Dependencies: Redis, PostgreSQL migration
+
+## Overview
+Implement comprehensive caching strategy using Redis to improve performance, reduce database load, and enhance user experience. Focus on caching frequently accessed data and expensive computations.
+
+## Tasks
+
+### 1. Create Cache Service Architecture
+- [ ] Create `/check/src/services/cache/cache-service.ts`:
+  ```typescript
+  import { createClient, RedisClientType } from 'redis';
+  
+  export interface CacheOptions {
+    ttl?: number; // Time to live in seconds
+    tags?: string[]; // For cache invalidation
+    compress?: boolean; // For large values
+  }
+  
+  export class CacheService {
+    private client: RedisClientType;
+    private defaultTTL = 3600; // 1 hour
+    private keyPrefix = 'cache:';
+    private compressionThreshold = 1024; // 1KB
+    
+    constructor() {
+      this.client = createClient({
+        url: process.env.REDIS_URL,
+        socket: {
+          connectTimeout: 5000,
+          keepAlive: 30000
+        }
+      });
+      
+      this.client.on('error', (err) => {
+        log.error('Redis cache error:', err);
+      });
+      
+      this.client.on('connect', () => {
+        log.info('Cache service connected');
+      });
+    }
+    
+    async get<T>(key: string): Promise<T | null> {
+      try {
+        const fullKey = this.keyPrefix + key;
+        const value = await this.client.get(fullKey);
+        
+        if (!value) return null;
+        
+        // Handle compressed values
+        if (value.startsWith('gzip:')) {
+          const compressed = Buffer.from(value.slice(5), 'base64');
+          const decompressed = await gunzip(compressed);
+          return JSON.parse(decompressed.toString());
+        }
+        
+        return JSON.parse(value);
+      } catch (error) {
+        log.error('Cache get error', { key, error });
+        return null; // Fail gracefully
+      }
+    }
+    
+    async set<T>(
+      key: string, 
+      value: T, 
+      options: CacheOptions = {}
+    ): Promise<void> {
+      try {
+        const fullKey = this.keyPrefix + key;
+        let serialized = JSON.stringify(value);
+        
+        // Compress large values
+        if (options.compress || serialized.length > this.compressionThreshold) {
+          const compressed = await gzip(serialized);
+          serialized = 'gzip:' + compressed.toString('base64');
+        }
+        
+        const ttl = options.ttl || this.defaultTTL;
+        await this.client.setEx(fullKey, ttl, serialized);
+        
+        // Handle tags for invalidation
+        if (options.tags) {
+          await this.addToTags(key, options.tags);
+        }
+      } catch (error) {
+        log.error('Cache set error', { key, error });
+        // Don't throw - caching should not break the app
+      }
+    }
+    
+    async invalidate(pattern: string): Promise<void> {
+      const keys = await this.client.keys(this.keyPrefix + pattern);
+      if (keys.length > 0) {
+        await this.client.del(keys);
+      }
+    }
+    
+    async invalidateByTag(tag: string): Promise<void> {
+      const keys = await this.client.sMembers(`tag:${tag}`);
+      if (keys.length > 0) {
+        await this.client.del(keys);
+        await this.client.del(`tag:${tag}`);
+      }
+    }
+  }
+  ```
+
+### 2. Create Cache Decorators
+- [ ] Create `/check/src/decorators/cache.decorator.ts`:
+  ```typescript
+  export function Cacheable(options: CacheOptions = {}) {
+    return function (
+      target: any,
+      propertyName: string,
+      descriptor: PropertyDescriptor
+    ) {
+      const originalMethod = descriptor.value;
+      
+      descriptor.value = async function (...args: any[]) {
+        // Generate cache key from method name and arguments
+        const cacheKey = `${target.constructor.name}:${propertyName}:${JSON.stringify(args)}`;
+        
+        // Try to get from cache
+        const cached = await cacheService.get(cacheKey);
+        if (cached !== null) {
+          log.debug('Cache hit', { method: propertyName });
+          return cached;
+        }
+        
+        // Call original method
+        const result = await originalMethod.apply(this, args);
+        
+        // Cache the result
+        await cacheService.set(cacheKey, result, options);
+        
+        return result;
+      };
+      
+      return descriptor;
+    };
+  }
+  
+  export function CacheInvalidate(patterns: string[]) {
+    return function (
+      target: any,
+      propertyName: string,
+      descriptor: PropertyDescriptor
+    ) {
+      const originalMethod = descriptor.value;
+      
+      descriptor.value = async function (...args: any[]) {
+        const result = await originalMethod.apply(this, args);
+        
+        // Invalidate cache patterns
+        for (const pattern of patterns) {
+          await cacheService.invalidate(pattern);
+        }
+        
+        return result;
+      };
+      
+      return descriptor;
+    };
+  }
+  ```
+
+### 3. Implement User Cache Layer
+- [ ] Update `/check/src/services/user-service.ts`:
+  ```typescript
+  export class UserService {
+    @Cacheable({ ttl: 3600, tags: ['user'] })
+    async getUser(id: string): Promise<User | null> {
+      return await queryOne<User>(
+        'SELECT * FROM users WHERE id = $1',
+        [id]
+      );
+    }
+    
+    @Cacheable({ ttl: 7200 })
+    async getUserByEmail(email: string): Promise<User | null> {
+      return await queryOne<User>(
+        'SELECT * FROM users WHERE email = $1',
+        [email]
+      );
+    }
+    
+    @CacheInvalidate(['UserService:getUser:*', 'UserService:getUserByEmail:*'])
+    async updateUser(id: string, data: Partial<User>): Promise<void> {
+      await run(
+        'UPDATE users SET name = $2, updated_at = NOW() WHERE id = $1',
+        [id, data.name]
+      );
+      
+      // Also invalidate by tag
+      await cacheService.invalidateByTag('user');
+    }
+  }
+  ```
+
+### 4. Implement Conversation Cache
+- [ ] Create `/check/src/services/cache/conversation-cache.ts`:
+  ```typescript
+  export class ConversationCache {
+    private cacheService: CacheService;
+    
+    async getConversation(id: string): Promise<Conversation | null> {
+      const cacheKey = `conversation:${id}`;
+      
+      // Try cache first
+      const cached = await this.cacheService.get<Conversation>(cacheKey);
+      if (cached) return cached;
+      
+      // Load from database
+      const conversation = await queryOne<Conversation>(
+        'SELECT * FROM conversations WHERE id = $1',
+        [id]
+      );
+      
+      if (conversation) {
+        // Cache based on status
+        const ttl = conversation.status === 'completed' 
+          ? 86400 // 24 hours for completed
+          : 300; // 5 minutes for in-progress
+          
+        await this.cacheService.set(cacheKey, conversation, { ttl });
+      }
+      
+      return conversation;
+    }
+    
+    async getUserConversations(
+      userId: string, 
+      limit = 20
+    ): Promise<Conversation[]> {
+      const cacheKey = `user-conversations:${userId}:${limit}`;
+      
+      return await this.cacheService.getOrSet(
+        cacheKey,
+        async () => {
+          return await query<Conversation>(`
+            SELECT * FROM conversations 
+            WHERE user_id = $1 
+            ORDER BY created_at DESC 
+            LIMIT $2
+          `, [userId, limit]);
+        },
+        { ttl: 300, tags: [`user:${userId}`] }
+      );
+    }
+    
+    async invalidateUserConversations(userId: string): Promise<void> {
+      await this.cacheService.invalidate(`user-conversations:${userId}:*`);
+      await this.cacheService.invalidateByTag(`user:${userId}`);
+    }
+  }
+  ```
+
+### 5. Implement Session Cache
+- [ ] Create `/check/src/services/cache/session-cache.ts`:
+  ```typescript
+  export class SessionCache {
+    private ttl = 7 * 24 * 60 * 60; // 7 days
+    
+    async getSession(token: string): Promise<Session | null> {
+      const tokenHash = this.hashToken(token);
+      const cacheKey = `session:${tokenHash}`;
+      
+      // Try cache
+      const cached = await cacheService.get<Session>(cacheKey);
+      if (cached) {
+        // Validate expiration
+        if (new Date(cached.expiresAt) > new Date()) {
+          return cached;
+        }
+        // Remove expired session
+        await this.removeSession(tokenHash);
+        return null;
+      }
+      
+      // Load from database
+      const session = await queryOne<Session>(
+        'SELECT * FROM sessions WHERE token_hash = $1 AND expires_at > NOW()',
+        [tokenHash]
+      );
+      
+      if (session) {
+        await cacheService.set(cacheKey, session, { ttl: this.ttl });
+      }
+      
+      return session;
+    }
+    
+    async createSession(userId: string, token: string): Promise<Session> {
+      const tokenHash = this.hashToken(token);
+      const expiresAt = new Date(Date.now() + this.ttl * 1000);
+      
+      const session = await queryOne<Session>(`
+        INSERT INTO sessions (user_id, token_hash, expires_at)
+        VALUES ($1, $2, $3)
+        RETURNING *
+      `, [userId, tokenHash, expiresAt]);
+      
+      // Cache immediately
+      await cacheService.set(
+        `session:${tokenHash}`, 
+        session, 
+        { ttl: this.ttl }
+      );
+      
+      return session;
+    }
+    
+    private hashToken(token: string): string {
+      return crypto.createHash('sha256').update(token).digest('hex');
+    }
+  }
+  ```
+
+### 6. Implement OpenAI Response Cache
+- [ ] Create `/check/src/services/cache/openai-cache.ts`:
+  ```typescript
+  export class OpenAICache {
+    async getTranscription(
+      audioHash: string
+    ): Promise<string | null> {
+      return await cacheService.get(`transcription:${audioHash}`);
+    }
+    
+    async cacheTranscription(
+      audioHash: string, 
+      transcription: string
+    ): Promise<void> {
+      // Cache for 30 days - transcriptions don't change
+      await cacheService.set(
+        `transcription:${audioHash}`,
+        transcription,
+        { ttl: 30 * 24 * 60 * 60, compress: true }
+      );
+    }
+    
+    async getAnalysis(
+      conversationId: string,
+      version: string
+    ): Promise<Analysis | null> {
+      return await cacheService.get(
+        `analysis:${conversationId}:${version}`
+      );
+    }
+    
+    async cacheAnalysis(
+      conversationId: string,
+      version: string,
+      analysis: Analysis
+    ): Promise<void> {
+      // Cache analysis results indefinitely
+      await cacheService.set(
+        `analysis:${conversationId}:${version}`,
+        analysis,
+        { compress: true }
+      );
+    }
+    
+    async getCachedCompletion(
+      prompt: string,
+      model: string
+    ): Promise<string | null> {
+      const hash = crypto
+        .createHash('sha256')
+        .update(`${model}:${prompt}`)
+        .digest('hex');
+        
+      return await cacheService.get(`completion:${hash}`);
+    }
+  }
+  ```
+
+### 7. Implement Cache Warming
+- [ ] Create `/check/src/services/cache/cache-warmer.ts`:
+  ```typescript
+  export class CacheWarmer {
+    async warmUserCache(userId: string): Promise<void> {
+      // Pre-load user data
+      const user = await userService.getUser(userId);
+      
+      // Pre-load recent conversations
+      const conversations = await conversationService.getUserConversations(
+        userId, 
+        10
+      );
+      
+      // Pre-load active subscription
+      const subscription = await subscriptionService.getActiveSubscription(
+        userId
+      );
+      
+      log.info('Cache warmed for user', { userId });
+    }
+    
+    async warmPopularData(): Promise<void> {
+      // Run periodically to keep popular data in cache
+      const popularUsers = await query<{ user_id: string }>(`
+        SELECT user_id, COUNT(*) as activity_count
+        FROM conversations
+        WHERE created_at > NOW() - INTERVAL '7 days'
+        GROUP BY user_id
+        ORDER BY activity_count DESC
+        LIMIT 100
+      `);
+      
+      for (const { user_id } of popularUsers) {
+        await this.warmUserCache(user_id);
+      }
+    }
+    
+    // Schedule cache warming
+    scheduleJob('0 */6 * * *', async () => {
+      await cacheWarmer.warmPopularData();
+    });
+  }
+  ```
+
+### 8. Implement Cache Metrics
+- [ ] Create `/check/src/services/cache/cache-metrics.ts`:
+  ```typescript
+  export class CacheMetrics {
+    private hits = 0;
+    private misses = 0;
+    private errors = 0;
+    
+    recordHit(): void {
+      this.hits++;
+      cacheHitCounter.inc();
+    }
+    
+    recordMiss(): void {
+      this.misses++;
+      cacheMissCounter.inc();
+    }
+    
+    recordError(): void {
+      this.errors++;
+      cacheErrorCounter.inc();
+    }
+    
+    getHitRate(): number {
+      const total = this.hits + this.misses;
+      return total > 0 ? this.hits / total : 0;
+    }
+    
+    async getMemoryUsage(): Promise<CacheMemoryStats> {
+      const info = await redisClient.info('memory');
+      return {
+        used: parseMemoryInfo(info, 'used_memory'),
+        peak: parseMemoryInfo(info, 'used_memory_peak'),
+        overhead: parseMemoryInfo(info, 'used_memory_overhead'),
+        dataset: parseMemoryInfo(info, 'used_memory_dataset')
+      };
+    }
+    
+    async getKeyStats(): Promise<CacheKeyStats> {
+      const dbSize = await redisClient.dbSize();
+      const ttlStats = await this.getTTLDistribution();
+      
+      return {
+        totalKeys: dbSize,
+        keysByPattern: await this.getKeysByPattern(),
+        ttlDistribution: ttlStats,
+        largestKeys: await this.getLargestKeys()
+      };
+    }
+  }
+  ```
+
+### 9. Implement Cache Middleware
+- [ ] Create `/check/src/middleware/cache.ts`:
+  ```typescript
+  export function cacheMiddleware(options: {
+    keyGenerator?: (req: Request) => string;
+    ttl?: number;
+    condition?: (req: Request) => boolean;
+  } = {}) {
+    return async (req: Request, res: Response, next: NextFunction) => {
+      // Skip caching for non-GET requests
+      if (req.method !== 'GET') {
+        return next();
+      }
+      
+      // Check condition
+      if (options.condition && !options.condition(req)) {
+        return next();
+      }
+      
+      // Generate cache key
+      const cacheKey = options.keyGenerator 
+        ? options.keyGenerator(req)
+        : `route:${req.path}:${JSON.stringify(req.query)}`;
+      
+      // Try cache
+      const cached = await cacheService.get(cacheKey);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        return res.json(cached);
+      }
+      
+      // Capture response
+      const originalJson = res.json;
+      res.json = function(data: any) {
+        res.setHeader('X-Cache', 'MISS');
+        
+        // Cache successful responses
+        if (res.statusCode === 200) {
+          cacheService.set(cacheKey, data, { ttl: options.ttl || 300 });
+        }
+        
+        return originalJson.call(this, data);
+      };
+      
+      next();
+    };
+  }
+  
+  // Usage example
+  router.get('/conversations/:id',
+    requireAuth,
+    cacheMiddleware({
+      keyGenerator: (req) => `conversation:${req.params.id}:${req.userId}`,
+      ttl: 600
+    }),
+    conversationController.getById
+  );
+  ```
+
+### 10. Testing Cache Implementation
+- [ ] Create `/check/src/services/cache/__tests__/cache-service.test.ts`:
+  ```typescript
+  describe('CacheService', () => {
+    let cacheService: CacheService;
+    
+    beforeEach(async () => {
+      cacheService = new CacheService();
+      await cacheService.clear();
+    });
+    
+    describe('basic operations', () => {
+      it('should store and retrieve values', async () => {
+        const key = 'test:key';
+        const value = { data: 'test' };
+        
+        await cacheService.set(key, value);
+        const retrieved = await cacheService.get(key);
+        
+        expect(retrieved).toEqual(value);
+      });
+      
+      it('should respect TTL', async () => {
+        const key = 'test:ttl';
+        const value = 'test';
+        
+        await cacheService.set(key, value, { ttl: 1 });
+        
+        // Should exist immediately
+        expect(await cacheService.get(key)).toBe(value);
+        
+        // Should expire after TTL
+        await new Promise(resolve => setTimeout(resolve, 1100));
+        expect(await cacheService.get(key)).toBeNull();
+      });
+      
+      it('should compress large values', async () => {
+        const key = 'test:large';
+        const value = 'x'.repeat(2000); // 2KB string
+        
+        await cacheService.set(key, value, { compress: true });
+        const retrieved = await cacheService.get(key);
+        
+        expect(retrieved).toBe(value);
+      });
+    });
+    
+    describe('cache invalidation', () => {
+      it('should invalidate by pattern', async () => {
+        await cacheService.set('user:1:profile', { id: 1 });
+        await cacheService.set('user:1:settings', { theme: 'dark' });
+        await cacheService.set('user:2:profile', { id: 2 });
+        
+        await cacheService.invalidate('user:1:*');
+        
+        expect(await cacheService.get('user:1:profile')).toBeNull();
+        expect(await cacheService.get('user:1:settings')).toBeNull();
+        expect(await cacheService.get('user:2:profile')).not.toBeNull();
+      });
+      
+      it('should invalidate by tag', async () => {
+        await cacheService.set('data1', 'value1', { tags: ['user:1'] });
+        await cacheService.set('data2', 'value2', { tags: ['user:1'] });
+        await cacheService.set('data3', 'value3', { tags: ['user:2'] });
+        
+        await cacheService.invalidateByTag('user:1');
+        
+        expect(await cacheService.get('data1')).toBeNull();
+        expect(await cacheService.get('data2')).toBeNull();
+        expect(await cacheService.get('data3')).not.toBeNull();
+      });
+    });
+  });
+  ```
+
+## Acceptance Criteria
+- [ ] Cache service integrated and working
+- [ ] Hit rate > 80% for common queries
+- [ ] Response time improved by 50%+
+- [ ] Cache invalidation working correctly
+- [ ] No stale data issues
+- [ ] Monitoring and metrics in place
+- [ ] Graceful degradation when Redis is down
+
+## Performance Targets
+- Cache hit rate: > 80%
+- Cache response time: < 5ms
+- Memory usage: < 1GB
+- Eviction rate: < 5%
+
+## Cache Configuration
+```typescript
+export const cacheConfig = {
+  user: {
+    profile: { ttl: 3600 }, // 1 hour
+    sessions: { ttl: 86400 }, // 24 hours
+  },
+  conversation: {
+    active: { ttl: 300 }, // 5 minutes
+    completed: { ttl: 86400 }, // 24 hours
+    list: { ttl: 600 }, // 10 minutes
+  },
+  openai: {
+    transcription: { ttl: 2592000 }, // 30 days
+    analysis: { ttl: Infinity }, // Forever
+  }
+};
+```
+
+## Monitoring Plan
+- Track cache hit/miss rates
+- Monitor memory usage
+- Alert on high eviction rates
+- Track cache operation latency
+- Dashboard for cache statistics

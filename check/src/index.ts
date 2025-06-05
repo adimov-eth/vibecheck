@@ -8,12 +8,17 @@ import { config, redisClient } from "@/config";
 import { runMigrations } from "@/database/migrations"; // Import the migration runner
 import { formatError } from "@/utils/error-formatter";
 import { log } from "@/utils/logger";
+import { memoryMonitor } from "@/utils/memory-monitor";
+import { streamManager } from "@/utils/stream-manager";
+import { fileCleanupService } from "@/services/file-cleanup-service";
+import { initializeDirectories, initializeJWTKeys, initializeCache } from "@/utils/init";
 import {
 	handleUpgrade,
 	initialize,
 	sendToSubscribedClients,
 	shutdown,
 } from "@/utils/websocket";
+import { handleMemoryPressure } from "@/utils/websocket/state";
 
 const WEBSOCKET_NOTIFICATION_CHANNEL = "websocket-notifications";
 
@@ -26,6 +31,33 @@ const startServer = async () => {
 
 		// 2. Run Migrations (handles schema creation and updates)
 		await runMigrations(); // This now includes initial schema setup
+
+		// 3. Initialize directories and JWT keys
+		await initializeDirectories();
+		await initializeJWTKeys();
+		
+		// 4. Initialize cache services
+		await initializeCache();
+
+		// 5. Start memory monitoring and file cleanup
+		memoryMonitor.startMonitoring();
+		fileCleanupService.startAutoCleanup(6); // Clean every 6 hours
+		
+		// Setup memory pressure handling
+		memoryMonitor.on('memory:cleanup_needed', () => {
+			log.warn('Memory cleanup triggered by monitor');
+			// Clean up streams first
+			const streamStats = streamManager.getStats();
+			if (streamStats.totalStreams > 0) {
+				log.info('Cleaning up streams due to memory pressure', {
+					streamsToClean: streamStats.totalStreams
+				});
+			}
+			
+			// Clean up WebSocket connections
+			const cleaned = handleMemoryPressure();
+			log.info('WebSocket cleanup completed', { connectionsCleanedUp: cleaned });
+		});
 
 		// Initialize Redis Subscriber for WebSocket notifications
 		subscriber = redisClient.duplicate();
@@ -103,6 +135,13 @@ const startServer = async () => {
 
 		const gracefulShutdown = async (): Promise<void> => {
 			log.info("Shutting down server...");
+
+			// Stop memory monitoring and file cleanup
+			memoryMonitor.stopMonitoring();
+			fileCleanupService.stopAutoCleanup();
+			
+			// Cleanup all streams
+			await streamManager.cleanup();
 
 			// Shutdown WebSocket server first
 			shutdown();

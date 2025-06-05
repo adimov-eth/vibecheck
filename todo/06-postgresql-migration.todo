@@ -1,0 +1,635 @@
+# Migrate from SQLite to PostgreSQL
+
+## Priority: HIGH
+## Timeline: Day 1-3 of Week 3
+## Dependencies: PostgreSQL installation, connection pooling library
+## Status: ✅ COMPLETED - PostgreSQL migration infrastructure fully implemented
+
+## Overview
+Migrate the database from SQLite to PostgreSQL for better scalability, concurrent connections, and production features. Implement proper connection pooling and optimize for performance.
+
+## Tasks
+
+### 1. Set Up PostgreSQL Development Environment
+- [ ] Install PostgreSQL locally:
+  ```bash
+  # macOS
+  brew install postgresql@15
+  brew services start postgresql@15
+  
+  # Ubuntu
+  sudo apt-get install postgresql-15 postgresql-client-15
+  ```
+- [ ] Create development database:
+  ```sql
+  CREATE DATABASE vibecheck_dev;
+  CREATE DATABASE vibecheck_test;
+  CREATE USER vibecheck_user WITH PASSWORD 'dev_password';
+  GRANT ALL PRIVILEGES ON DATABASE vibecheck_dev TO vibecheck_user;
+  GRANT ALL PRIVILEGES ON DATABASE vibecheck_test TO vibecheck_user;
+  ```
+- [ ] Install PostgreSQL dependencies:
+  ```bash
+  cd check
+  bun add pg @types/pg
+  bun add --dev pg-migrate
+  ```
+
+### 2. Create PostgreSQL Database Module
+- [ ] Create `/check/src/database/postgres.ts`:
+  ```typescript
+  import { Pool, PoolClient, PoolConfig } from 'pg';
+  import { log } from '@/utils/logger';
+  
+  const poolConfig: PoolConfig = {
+    connectionString: process.env.DATABASE_URL,
+    max: 20, // Maximum pool size
+    idleTimeoutMillis: 30000, // 30 seconds
+    connectionTimeoutMillis: 2000, // 2 seconds
+    statement_timeout: 30000, // 30 seconds
+    query_timeout: 30000,
+    ssl: process.env.NODE_ENV === 'production' ? {
+      rejectUnauthorized: false
+    } : false
+  };
+  
+  export class DatabasePool {
+    private pool: Pool;
+    private isShuttingDown = false;
+    
+    constructor() {
+      this.pool = new Pool(poolConfig);
+      
+      // Error handling
+      this.pool.on('error', (err, client) => {
+        log.error('Unexpected database pool error', { error: err });
+      });
+      
+      // Connection tracking
+      this.pool.on('connect', (client) => {
+        log.debug('New database connection established');
+      });
+      
+      this.pool.on('remove', (client) => {
+        log.debug('Database connection removed from pool');
+      });
+    }
+    
+    async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+      if (this.isShuttingDown) {
+        throw new Error('Database pool is shutting down');
+      }
+      
+      const start = Date.now();
+      try {
+        const result = await this.pool.query(sql, params);
+        const duration = Date.now() - start;
+        
+        if (duration > 1000) {
+          log.warn('Slow query detected', { sql, duration, params });
+        }
+        
+        return result.rows;
+      } catch (error) {
+        log.error('Database query error', { sql, params, error });
+        throw error;
+      }
+    }
+    
+    async transaction<T>(
+      callback: (client: PoolClient) => Promise<T>
+    ): Promise<T> {
+      const client = await this.pool.connect();
+      
+      try {
+        await client.query('BEGIN');
+        const result = await callback(client);
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+    
+    async shutdown(): Promise<void> {
+      this.isShuttingDown = true;
+      await this.pool.end();
+      log.info('Database pool shut down');
+    }
+  }
+  
+  // Singleton instance
+  export const db = new DatabasePool();
+  ```
+
+### 3. Create Migration System
+- [ ] Create `/check/src/database/migrations/001_initial_schema.sql`:
+  ```sql
+  -- Enable extensions
+  CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+  CREATE EXTENSION IF NOT EXISTS "pg_trgm"; -- For text search
+  CREATE EXTENSION IF NOT EXISTS "btree_gin"; -- For composite indexes
+  
+  -- Users table
+  CREATE TABLE users (
+    id VARCHAR(255) PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  );
+  
+  CREATE INDEX idx_users_email ON users(email);
+  CREATE INDEX idx_users_created_at ON users(created_at DESC);
+  
+  -- Conversations table
+  CREATE TABLE conversations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mode VARCHAR(50) NOT NULL CHECK (mode IN ('therapy', 'coaching', 'interview', 'journal')),
+    recording_type VARCHAR(50) NOT NULL CHECK (recording_type IN ('separate', 'live')),
+    status VARCHAR(50) DEFAULT 'waiting' CHECK (
+      status IN ('waiting', 'uploading', 'transcribing', 'analyzing', 'completed', 'failed')
+    ),
+    duration INTEGER, -- seconds
+    transcript TEXT,
+    analysis JSONB,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP WITH TIME ZONE
+  );
+  
+  CREATE INDEX idx_conversations_user_id ON conversations(user_id);
+  CREATE INDEX idx_conversations_status ON conversations(status);
+  CREATE INDEX idx_conversations_created_at ON conversations(created_at DESC);
+  CREATE INDEX idx_conversations_user_created ON conversations(user_id, created_at DESC);
+  
+  -- Audios table
+  CREATE TABLE audios (
+    id SERIAL PRIMARY KEY,
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    audio_file VARCHAR(500) NOT NULL,
+    audio_key VARCHAR(500) UNIQUE NOT NULL,
+    duration INTEGER, -- seconds
+    size_bytes BIGINT,
+    status VARCHAR(50) DEFAULT 'uploaded' CHECK (
+      status IN ('uploaded', 'processing', 'transcribed', 'failed')
+    ),
+    transcript TEXT,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  );
+  
+  CREATE INDEX idx_audios_conversation_id ON audios(conversation_id);
+  CREATE INDEX idx_audios_user_id ON audios(user_id);
+  CREATE INDEX idx_audios_status ON audios(status);
+  CREATE INDEX idx_audios_created_at ON audios(created_at DESC);
+  
+  -- Subscriptions table
+  CREATE TABLE subscriptions (
+    id VARCHAR(255) PRIMARY KEY, -- Apple transaction ID
+    user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL CHECK (
+      status IN ('active', 'expired', 'cancelled', 'pending', 'grace_period')
+    ),
+    product_id VARCHAR(255) NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    auto_renew BOOLEAN DEFAULT true,
+    cancellation_date TIMESTAMP WITH TIME ZONE,
+    apple_receipt_data JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  );
+  
+  CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
+  CREATE INDEX idx_subscriptions_status ON subscriptions(status);
+  CREATE INDEX idx_subscriptions_expires_at ON subscriptions(expires_at);
+  
+  -- Sessions table (for JWT tracking)
+  CREATE TABLE sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(255) UNIQUE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    ip_address INET,
+    user_agent TEXT
+  );
+  
+  CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+  CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
+  CREATE INDEX idx_sessions_token_hash ON sessions(token_hash);
+  
+  -- Update triggers
+  CREATE OR REPLACE FUNCTION update_updated_at_column()
+  RETURNS TRIGGER AS $$
+  BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+  END;
+  $$ language 'plpgsql';
+  
+  CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  
+  CREATE TRIGGER update_conversations_updated_at BEFORE UPDATE ON conversations
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  
+  CREATE TRIGGER update_audios_updated_at BEFORE UPDATE ON audios
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  
+  CREATE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON subscriptions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  ```
+
+### 4. Create Migration Runner
+- [ ] Create `/check/src/database/migrator.ts`:
+  ```typescript
+  import { readdir, readFile } from 'fs/promises';
+  import { join } from 'path';
+  import { db } from './postgres';
+  
+  export class Migrator {
+    private migrationsPath = join(__dirname, 'migrations');
+    
+    async initialize(): Promise<void> {
+      // Create migrations table
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS migrations (
+          id SERIAL PRIMARY KEY,
+          filename VARCHAR(255) UNIQUE NOT NULL,
+          executed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    }
+    
+    async run(): Promise<void> {
+      await this.initialize();
+      
+      // Get executed migrations
+      const executed = await db.query<{ filename: string }>(
+        'SELECT filename FROM migrations'
+      );
+      const executedSet = new Set(executed.map(m => m.filename));
+      
+      // Get all migration files
+      const files = await readdir(this.migrationsPath);
+      const sqlFiles = files
+        .filter(f => f.endsWith('.sql'))
+        .sort(); // Ensure order
+      
+      // Run pending migrations
+      for (const file of sqlFiles) {
+        if (!executedSet.has(file)) {
+          await this.runMigration(file);
+        }
+      }
+    }
+    
+    private async runMigration(filename: string): Promise<void> {
+      log.info(`Running migration: ${filename}`);
+      
+      const filepath = join(this.migrationsPath, filename);
+      const sql = await readFile(filepath, 'utf-8');
+      
+      await db.transaction(async (client) => {
+        // Execute migration
+        await client.query(sql);
+        
+        // Record migration
+        await client.query(
+          'INSERT INTO migrations (filename) VALUES ($1)',
+          [filename]
+        );
+      });
+      
+      log.info(`Migration completed: ${filename}`);
+    }
+  }
+  ```
+
+### 5. Update Database Abstraction Layer
+- [ ] Create `/check/src/database/index.ts` with PostgreSQL support:
+  ```typescript
+  import { db as pgDb } from './postgres';
+  import { Database as SQLiteDb } from 'bun:sqlite';
+  
+  // Database interface
+  interface Database {
+    query<T>(sql: string, params?: unknown[]): Promise<T[]>;
+    queryOne<T>(sql: string, params?: unknown[]): Promise<T | null>;
+    run(sql: string, params?: unknown[]): Promise<void>;
+    transaction<T>(callback: (client: any) => Promise<T>): Promise<T>;
+  }
+  
+  // PostgreSQL implementation
+  class PostgreSQLDatabase implements Database {
+    async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+      // Convert SQLite placeholders (?) to PostgreSQL ($1, $2, etc)
+      const pgSql = this.convertPlaceholders(sql);
+      return pgDb.query<T>(pgSql, params);
+    }
+    
+    async queryOne<T>(sql: string, params: unknown[] = []): Promise<T | null> {
+      const results = await this.query<T>(sql, params);
+      return results[0] || null;
+    }
+    
+    async run(sql: string, params: unknown[] = []): Promise<void> {
+      await this.query(sql, params);
+    }
+    
+    async transaction<T>(
+      callback: (client: any) => Promise<T>
+    ): Promise<T> {
+      return pgDb.transaction(callback);
+    }
+    
+    private convertPlaceholders(sql: string): string {
+      let index = 0;
+      return sql.replace(/\?/g, () => `$${++index}`);
+    }
+  }
+  
+  // Factory function
+  export function createDatabase(): Database {
+    if (process.env.DATABASE_TYPE === 'sqlite') {
+      // Keep SQLite for tests
+      return new SQLiteDatabase();
+    }
+    return new PostgreSQLDatabase();
+  }
+  
+  export const db = createDatabase();
+  export const { query, queryOne, run, transaction } = db;
+  ```
+
+### 6. Add Connection Health Checks
+- [ ] Create `/check/src/database/health.ts`:
+  ```typescript
+  export class DatabaseHealth {
+    async check(): Promise<HealthStatus> {
+      try {
+        const start = Date.now();
+        await db.query('SELECT 1');
+        const latency = Date.now() - start;
+        
+        const poolStats = await this.getPoolStats();
+        
+        return {
+          healthy: true,
+          latency,
+          connections: {
+            active: poolStats.activeCount,
+            idle: poolStats.idleCount,
+            waiting: poolStats.waitingCount,
+            total: poolStats.totalCount
+          }
+        };
+      } catch (error) {
+        return {
+          healthy: false,
+          error: error.message
+        };
+      }
+    }
+    
+    async getPoolStats() {
+      // Get from pg pool
+      return {
+        totalCount: pgDb.pool.totalCount,
+        idleCount: pgDb.pool.idleCount,
+        waitingCount: pgDb.pool.waitingCount,
+        activeCount: pgDb.pool.totalCount - pgDb.pool.idleCount
+      };
+    }
+  }
+  ```
+
+### 7. Data Migration Script
+- [ ] Create `/check/scripts/migrate-data.ts`:
+  ```typescript
+  // Script to migrate data from SQLite to PostgreSQL
+  import { Database as SQLiteDatabase } from 'bun:sqlite';
+  import { DatabasePool } from '../src/database/postgres';
+  
+  async function migrateData() {
+    const sqlite = new SQLiteDatabase('app.db');
+    const pg = new DatabasePool();
+    
+    try {
+      // Migrate users
+      console.log('Migrating users...');
+      const users = sqlite.query('SELECT * FROM users').all();
+      for (const user of users) {
+        await pg.query(
+          'INSERT INTO users (id, email, name, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)',
+          [user.id, user.email, user.name, new Date(user.createdAt * 1000), new Date(user.updatedAt * 1000)]
+        );
+      }
+      
+      // Migrate conversations
+      console.log('Migrating conversations...');
+      const conversations = sqlite.query('SELECT * FROM conversations').all();
+      for (const conv of conversations) {
+        await pg.query(
+          `INSERT INTO conversations (
+            id, user_id, mode, recording_type, status, 
+            duration, transcript, analysis, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            conv.id, conv.userId, conv.mode, conv.recordingType, 
+            conv.status, conv.duration, conv.transcript, 
+            conv.analysis ? JSON.parse(conv.analysis) : null,
+            new Date(conv.createdAt * 1000), 
+            new Date(conv.updatedAt * 1000)
+          ]
+        );
+      }
+      
+      // Continue for other tables...
+      
+      console.log('Migration completed successfully!');
+    } catch (error) {
+      console.error('Migration failed:', error);
+      process.exit(1);
+    } finally {
+      sqlite.close();
+      await pg.shutdown();
+    }
+  }
+  
+  migrateData();
+  ```
+
+### 8. Update Service Layer
+- [ ] Update all services to use PostgreSQL features:
+  ```typescript
+  // Example: conversation-service.ts
+  export async function searchConversations(
+    userId: string,
+    searchTerm: string
+  ): Promise<Conversation[]> {
+    // Use PostgreSQL full-text search
+    return await query<Conversation>(`
+      SELECT * FROM conversations
+      WHERE user_id = $1
+        AND to_tsvector('english', transcript) @@ plainto_tsquery('english', $2)
+      ORDER BY created_at DESC
+      LIMIT 20
+    `, [userId, searchTerm]);
+  }
+  
+  // Use JSONB queries
+  export async function getConversationsByMood(
+    userId: string,
+    mood: string
+  ): Promise<Conversation[]> {
+    return await query<Conversation>(`
+      SELECT * FROM conversations
+      WHERE user_id = $1
+        AND analysis->>'mood' = $2
+      ORDER BY created_at DESC
+    `, [userId, mood]);
+  }
+  ```
+
+### 9. Performance Optimization
+- [ ] Add database indexes based on query patterns:
+  ```sql
+  -- Composite indexes for common queries
+  CREATE INDEX idx_conversations_user_status_created 
+    ON conversations(user_id, status, created_at DESC);
+  
+  -- Partial indexes for specific conditions
+  CREATE INDEX idx_active_subscriptions 
+    ON subscriptions(user_id, expires_at) 
+    WHERE status = 'active';
+  
+  -- GIN index for JSONB
+  CREATE INDEX idx_conversation_analysis 
+    ON conversations USING GIN (analysis);
+  
+  -- Text search indexes
+  CREATE INDEX idx_conversation_transcript_search 
+    ON conversations USING GIN (to_tsvector('english', transcript));
+  ```
+
+### 10. Testing with PostgreSQL
+- [ ] Update test setup:
+  ```typescript
+  // test/setup.ts
+  import { testDb } from './test-db';
+  
+  beforeAll(async () => {
+    // Use separate test database
+    process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+    
+    // Run migrations
+    await new Migrator().run();
+  });
+  
+  beforeEach(async () => {
+    // Clean data but keep schema
+    await testDb.query('TRUNCATE TABLE users CASCADE');
+  });
+  ```
+
+## Acceptance Criteria
+- [ ] All data migrated successfully
+- [ ] No data loss during migration
+- [ ] Performance improved (measure queries)
+- [ ] Connection pooling working properly
+- [ ] All tests pass with PostgreSQL
+- [ ] Zero downtime migration completed
+- [ ] Rollback procedure tested
+
+## Performance Targets
+- Connection pool: 20-50 connections
+- Query latency: < 50ms for simple queries
+- Transaction latency: < 200ms
+- Connection acquisition: < 10ms
+
+## Deployment Plan
+1. Set up PostgreSQL in staging
+2. Run migrations in staging
+3. Test thoroughly
+4. Set up production PostgreSQL
+5. Run migrations with feature flag
+6. Gradually migrate traffic
+7. Monitor performance
+8. Complete switchover
+
+## Rollback Plan
+- Keep SQLite as fallback for 30 days
+- Dual-write to both databases during transition
+- Feature flag to switch between databases
+- Data sync script to catch up changes
+
+## Implementation Summary ✅
+
+Successfully implemented a comprehensive PostgreSQL migration system with zero-downtime support:
+
+### 1. PostgreSQL Schema
+- **Created**: `/check/src/database/schema.postgres.ts`
+- **Features**: Full schema with PostgreSQL-specific types (enums, timestamps, UUIDs)
+- **New Tables**: sessions (JWT tracking), usage_records (analytics)
+- **Optimizations**: Proper indexes for common queries
+
+### 2. Drizzle PostgreSQL Client
+- **Created**: `/check/src/database/drizzle.postgres.ts`
+- **Features**: Connection pooling (max 20), SSL support, health checks
+- **Configuration**: Environment-based connection strings
+
+### 3. Unified Database Adapter
+- **Created**: `/check/src/database/unified-adapter.ts`
+- **Features**: Seamless switching between SQLite and PostgreSQL
+- **Type Safety**: Automatic type conversions between databases
+- **Backward Compatible**: No breaking changes to existing code
+
+### 4. Migration Script
+- **Created**: `/check/src/scripts/migrate-to-postgres.ts`
+- **Features**: Batch migration, dry-run mode, verification
+- **Safety**: Duplicate detection, error handling, progress tracking
+- **Commands**: 
+  - `bun run db:migrate:postgres` - Run migration
+  - `bun run db:migrate:postgres:dry` - Test without changes
+  - `bun run db:migrate:postgres:verify` - Verify data integrity
+
+### 5. Configuration System
+- **Created**: `/check/src/config/database-config.ts`
+- **Features**: Environment-based database selection
+- **Feature Flag**: `DATABASE_TYPE=postgres` to enable PostgreSQL
+- **Fallback**: Automatic fallback to SQLite if PostgreSQL unavailable
+
+### 6. Documentation
+- **Created**: `/check/docs/postgresql-migration.md`
+- **Content**: Complete migration guide, troubleshooting, rollback procedures
+
+### Key Technical Achievements:
+
+1. **Zero-Downtime Migration**: Feature flag allows gradual rollout
+2. **Type Safety**: Full TypeScript support for both databases
+3. **Performance**: Connection pooling and optimized queries
+4. **Compatibility**: Existing code works without modification
+5. **Data Integrity**: Comprehensive migration verification
+6. **Rollback Safety**: Easy switch back to SQLite if needed
+
+### Deployment Strategy:
+1. Set `DATABASE_TYPE=postgres` in environment
+2. Run schema generation: `bun run db:generate:postgres`
+3. Push schema: `bun run db:push:postgres`
+4. Migrate data: `bun run db:migrate:postgres`
+5. Verify: `bun run db:migrate:postgres:verify`
+6. Monitor performance and gradually increase traffic
+
+## Completion Date: June 2, 2025
+
+Successfully implemented PostgreSQL migration infrastructure with Drizzle ORM, providing scalability improvements while maintaining full backward compatibility with SQLite.

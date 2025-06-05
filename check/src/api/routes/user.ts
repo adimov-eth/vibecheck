@@ -1,12 +1,15 @@
 import { getUserId, requireAuth } from "@/middleware/auth";
 import { AuthenticationError, NotFoundError } from "@/middleware/error";
+import { authRateLimitMiddleware, isRateLimitingEnabled } from "@/middleware/auth-rate-limit";
 import { createSessionToken } from "@/services/session-service";
 import { getUserUsageStats } from "@/services/usage-service";
+import { AccountLockoutService } from "@/services/account-lockout-service";
 import {
 	authenticateWithApple,
 	getUser,
 	upsertUser,
 } from "@/services/user-service";
+import { userCacheMiddleware } from "@/middleware/cache";
 import type { AuthenticatedRequest } from "@/types/common";
 import { asyncHandler } from "@/utils/async-handler";
 import { formatError } from "@/utils/error-formatter";
@@ -118,6 +121,18 @@ const appleAuth = async (req: Request, res: Response, next: NextFunction) => {
 		});
 	}
 
+	// Check if account is locked (if email is provided)
+	if (email && isRateLimitingEnabled()) {
+		const isLocked = await AccountLockoutService.isAccountLocked(email);
+		if (isLocked) {
+			return res.status(403).json({
+				success: false,
+				error: "Account is locked due to security reasons. Please check your email for unlock instructions.",
+				code: "ACCOUNT_LOCKED"
+			});
+		}
+	}
+
 	let formattedName: string | undefined;
 	if (fullName?.givenName || fullName?.familyName) {
 		formattedName =
@@ -132,6 +147,21 @@ const appleAuth = async (req: Request, res: Response, next: NextFunction) => {
 		);
 
 		if (!authResult.success) {
+			// Record failed attempt
+			if (isRateLimitingEnabled() && email) {
+				await authRateLimitMiddleware.recordFailure(req, email, authResult.error.message);
+				
+				// Check if account should be locked
+				const shouldLock = await AccountLockoutService.checkAndLockAccount(email);
+				if (shouldLock) {
+					return res.status(403).json({
+						success: false,
+						error: "Account has been locked due to multiple failed login attempts. Please check your email for unlock instructions.",
+						code: "ACCOUNT_LOCKED"
+					});
+				}
+			}
+
 			if (authResult.code === "EMAIL_ALREADY_EXISTS") {
 				return res.status(409).json({
 					success: false,
@@ -146,6 +176,11 @@ const appleAuth = async (req: Request, res: Response, next: NextFunction) => {
 		}
 
 		const user = authResult.data;
+
+		// Reset rate limiting on successful auth
+		if (isRateLimitingEnabled()) {
+			await authRateLimitMiddleware.recordSuccess(req, user.email);
+		}
 
 		const sessionTokenResult = await createSessionToken(user.id);
 		if (!sessionTokenResult.success) {
@@ -209,9 +244,27 @@ const getUserUsage = async (
 	}
 };
 
+// Apply rate limiting middleware conditionally
+const rateLimitMiddlewares = isRateLimitingEnabled() 
+  ? [
+      authRateLimitMiddleware.byIP,
+      authRateLimitMiddleware.progressive,
+      authRateLimitMiddleware.captcha,
+      asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+        // Apply email-based rate limiting if email is provided
+        const email = req.body.email;
+        if (email) {
+          await authRateLimitMiddleware.byEmail(() => email)(req, res, next);
+        } else {
+          next();
+        }
+      })
+    ]
+  : [];
+
 // Routes
-router.get("/me", requireAuth, asyncHandler(getCurrentUser));
-router.post("/apple-auth", asyncHandler(appleAuth));
-router.get("/usage", requireAuth, asyncHandler(getUserUsage));
+router.get("/me", requireAuth, userCacheMiddleware({ ttl: 300 }), asyncHandler(getCurrentUser));
+router.post("/apple-auth", ...rateLimitMiddlewares, asyncHandler(appleAuth));
+router.get("/usage", requireAuth, userCacheMiddleware({ ttl: 60 }), asyncHandler(getUserUsage));
 
 export default router;

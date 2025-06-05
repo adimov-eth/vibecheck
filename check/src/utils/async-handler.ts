@@ -19,7 +19,11 @@ export const asyncHandler = (handler: AsyncRouteHandler) => {
       await handler(req, res, next);
     } catch (error) {
       // Log the error here for centralized error tracking
-      log.error("Unhandled error in route handler", { error: error instanceof Error ? error.message : String(error) });
+      log.error("Unhandled error in route handler", { 
+        error: error instanceof Error ? error.message : String(error),
+        errorName: error instanceof Error ? error.name : 'unknown',
+        errorStack: error instanceof Error ? error.stack : undefined
+      });
       next(error);
     }
   };

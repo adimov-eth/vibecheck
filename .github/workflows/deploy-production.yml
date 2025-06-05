@@ -53,10 +53,11 @@ jobs:
           # Setup SSH key
           mkdir -p ~/.ssh
           # Write key exactly as provided
-          cat > ~/.ssh/deploy_key << 'EOF'
-          ${{ secrets.DEPLOY_KEY }}
-          EOF
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          
+          # Remove any Windows line endings if present
+          sed -i 's/\r$//' ~/.ssh/deploy_key
           
           # Debug key info
           echo "Key info:"

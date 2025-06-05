@@ -3,6 +3,10 @@ import { ValidationError } from "@/middleware/error";
 import type { Audio } from "@/types";
 import { formatError } from "@/utils/error-formatter";
 import { log } from "@/utils/logger";
+import { streamManager } from "@/utils/stream-manager";
+import { createReadStream, createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
+import { unlink } from "fs/promises";
 
 export const createAudioRecord = async ({
 	conversationId,
@@ -254,4 +258,105 @@ export const checkAudioUploadConstraints = async ({
 		// Re-throw ValidationError or other caught errors
 		throw error;
 	}
+};
+
+
+/**
+ * Process audio file with proper stream management and cleanup
+ */
+export const processAudioFile = async (
+	inputPath: string,
+	outputPath: string,
+	conversationId: string
+): Promise<void> => {
+	const streamId = `audio-${conversationId}-${Date.now()}`;
+	
+	try {
+		// Create managed read stream
+		const readStreamManaged = await streamManager.createManagedStream(
+			`${streamId}-read`,
+			() => createReadStream(inputPath),
+			{ 
+				type: "audio-read",
+				inputPath,
+				conversationId 
+			}
+		);
+
+		// Create managed write stream  
+		const writeStreamManaged = await streamManager.createManagedStream(
+			`${streamId}-write`,
+			() => createWriteStream(outputPath),
+			{ 
+				type: "audio-write",
+				outputPath,
+				conversationId 
+			}
+		);
+
+		try {
+			// Use pipeline for proper error handling and cleanup
+			await pipeline(
+				readStreamManaged.stream,
+				writeStreamManaged.stream
+			);
+
+			log.info("Audio file processed successfully", {
+				inputPath,
+				outputPath,
+				conversationId
+			});
+		} finally {
+			// Cleanup streams
+			await readStreamManaged.cleanup();
+			await writeStreamManaged.cleanup();
+		}
+	} catch (error) {
+		log.error("Error processing audio file", {
+			inputPath,
+			outputPath,
+			conversationId,
+			error: formatError(error)
+		});
+		throw error;
+	}
+};
+
+/**
+ * Clean up temporary audio files
+ */
+export const cleanupAudioFile = async (filePath: string): Promise<void> => {
+	try {
+		await unlink(filePath);
+		log.debug("Cleaned up audio file", { filePath });
+	} catch (error) {
+		// Don't throw on cleanup errors, just log them
+		log.warn("Failed to cleanup audio file", {
+			filePath,
+			error: formatError(error)
+		});
+	}
+};
+
+/**
+ * Get audio processing statistics
+ */
+export const getAudioProcessingStats = (): {
+	activeStreams: number;
+	streamsByType: Record<string, number>;
+} => {
+	const stats = streamManager.getStats();
+	
+	// Filter for audio-related streams
+	const audioStreamsByType: Record<string, number> = {};
+	for (const [type, count] of Object.entries(stats.streamsByType)) {
+		if (type.includes("audio") || type.includes("Audio")) {
+			audioStreamsByType[type] = count;
+		}
+	}
+
+	return {
+		activeStreams: Object.values(audioStreamsByType).reduce((sum, count) => sum + count, 0),
+		streamsByType: audioStreamsByType
+	};
 };

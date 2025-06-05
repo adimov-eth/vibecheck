@@ -2,6 +2,7 @@
 import { requireAuth, requireResourceOwnership } from '@/middleware/auth';
 import { ValidationError } from '@/middleware/error';
 import { conversationsRateLimiter } from '@/middleware/rate-limit';
+import { userCacheMiddleware, cacheInvalidateMiddleware } from '@/middleware/cache';
 import { gptQueue } from '@/queues';
 import {
   createConversation,
@@ -125,9 +126,37 @@ const processConversation: RequestHandler = async (req, res) => {
 };
 
 // Define routes with middleware
-router.post('/', requireAuth, asyncHandler(createNewConversation));
-router.get('/:id', requireAuth, requireResourceOwnership({ getResourceById: getConversationById, resourceName: 'Conversation' }), asyncHandler(getConversation));
-router.get('/', requireAuth, asyncHandler(getAllConversations));
-router.post('/:id/process', requireAuth, requireResourceOwnership({ getResourceById: getConversationById, resourceName: 'Conversation' }), asyncHandler(processConversation));
+router.post('/', 
+  requireAuth, 
+  cacheInvalidateMiddleware((req) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    return [`user-conversations:${userId}:*`];
+  }),
+  asyncHandler(createNewConversation)
+);
+
+router.get('/:id', 
+  requireAuth, 
+  requireResourceOwnership({ getResourceById: getConversationById, resourceName: 'Conversation' }), 
+  userCacheMiddleware({ ttl: 600 }), 
+  asyncHandler(getConversation)
+);
+
+router.get('/', 
+  requireAuth, 
+  userCacheMiddleware({ ttl: 300 }), 
+  asyncHandler(getAllConversations)
+);
+
+router.post('/:id/process', 
+  requireAuth, 
+  requireResourceOwnership({ getResourceById: getConversationById, resourceName: 'Conversation' }), 
+  cacheInvalidateMiddleware((req) => {
+    const conversationId = req.params.id;
+    const userId = (req as AuthenticatedRequest).userId;
+    return [`conversation:${conversationId}`, `user-conversations:${userId}:*`];
+  }),
+  asyncHandler(processConversation)
+);
 
 export default router;

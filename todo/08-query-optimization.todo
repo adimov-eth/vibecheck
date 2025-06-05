@@ -1,0 +1,762 @@
+# Optimize Database Queries and Fix N+1 Problems
+
+## Priority: HIGH
+## Timeline: Day 6-8 of Week 3
+## Dependencies: PostgreSQL migration, caching layer
+
+## Overview
+Optimize database queries to eliminate N+1 problems, implement efficient data loading patterns, and improve overall query performance. Focus on common query patterns and implement monitoring.
+
+## Tasks
+
+### 1. Implement DataLoader Pattern
+- [ ] Install DataLoader:
+  ```bash
+  cd check
+  bun add dataloader @types/dataloader
+  ```
+- [ ] Create `/check/src/loaders/base-loader.ts`:
+  ```typescript
+  import DataLoader from 'dataloader';
+  import { log } from '@/utils/logger';
+  
+  export abstract class BaseLoader<K, V> {
+    protected loader: DataLoader<K, V>;
+    
+    constructor(
+      batchLoadFn: DataLoader.BatchLoadFn<K, V>,
+      options?: DataLoader.Options<K, V>
+    ) {
+      this.loader = new DataLoader(
+        async (keys) => {
+          const start = Date.now();
+          try {
+            const results = await batchLoadFn(keys);
+            const duration = Date.now() - start;
+            
+            if (duration > 100) {
+              log.warn('Slow loader batch', {
+                loader: this.constructor.name,
+                keys: keys.length,
+                duration
+              });
+            }
+            
+            return results;
+          } catch (error) {
+            log.error('Loader batch error', {
+              loader: this.constructor.name,
+              error
+            });
+            throw error;
+          }
+        },
+        {
+          cache: true,
+          maxBatchSize: 100,
+          batchScheduleFn: (callback) => setTimeout(callback, 10),
+          ...options
+        }
+      );
+    }
+    
+    async load(key: K): Promise<V> {
+      return this.loader.load(key);
+    }
+    
+    async loadMany(keys: K[]): Promise<(V | Error)[]> {
+      return this.loader.loadMany(keys);
+    }
+    
+    clear(key: K): void {
+      this.loader.clear(key);
+    }
+    
+    clearAll(): void {
+      this.loader.clearAll();
+    }
+  }
+  ```
+
+### 2. Create Specific Data Loaders
+- [ ] Create `/check/src/loaders/user-loader.ts`:
+  ```typescript
+  export class UserLoader extends BaseLoader<string, User | null> {
+    constructor() {
+      super(async (userIds) => {
+        const users = await query<User>(
+          'SELECT * FROM users WHERE id = ANY($1)',
+          [userIds]
+        );
+        
+        // Create map for O(1) lookup
+        const userMap = new Map(users.map(u => [u.id, u]));
+        
+        // Return in same order as requested
+        return userIds.map(id => userMap.get(id) || null);
+      });
+    }
+  }
+  
+  export class UserByEmailLoader extends BaseLoader<string, User | null> {
+    constructor() {
+      super(async (emails) => {
+        const users = await query<User>(
+          'SELECT * FROM users WHERE email = ANY($1)',
+          [emails]
+        );
+        
+        const userMap = new Map(users.map(u => [u.email, u]));
+        return emails.map(email => userMap.get(email) || null);
+      });
+    }
+  }
+  ```
+
+- [ ] Create `/check/src/loaders/conversation-loader.ts`:
+  ```typescript
+  export class ConversationLoader extends BaseLoader<string, Conversation | null> {
+    constructor() {
+      super(async (conversationIds) => {
+        const conversations = await query<Conversation>(
+          'SELECT * FROM conversations WHERE id = ANY($1)',
+          [conversationIds]
+        );
+        
+        const conversationMap = new Map(
+          conversations.map(c => [c.id, c])
+        );
+        
+        return conversationIds.map(id => conversationMap.get(id) || null);
+      });
+    }
+  }
+  
+  export class UserConversationsLoader extends BaseLoader<string, Conversation[]> {
+    constructor() {
+      super(async (userIds) => {
+        // Fetch all conversations for all users in one query
+        const conversations = await query<Conversation>(`
+          SELECT c.*, 
+                 array_agg(
+                   json_build_object(
+                     'id', a.id,
+                     'status', a.status,
+                     'duration', a.duration
+                   ) ORDER BY a.created_at
+                 ) as audios
+          FROM conversations c
+          LEFT JOIN audios a ON a.conversation_id = c.id
+          WHERE c.user_id = ANY($1)
+          GROUP BY c.id
+          ORDER BY c.created_at DESC
+        `, [userIds]);
+        
+        // Group by user
+        const userConversationsMap = new Map<string, Conversation[]>();
+        for (const conversation of conversations) {
+          const userId = conversation.userId;
+          if (!userConversationsMap.has(userId)) {
+            userConversationsMap.set(userId, []);
+          }
+          userConversationsMap.get(userId)!.push(conversation);
+        }
+        
+        // Return in order
+        return userIds.map(id => userConversationsMap.get(id) || []);
+      });
+    }
+  }
+  ```
+
+### 3. Create Loader Context
+- [ ] Create `/check/src/loaders/context.ts`:
+  ```typescript
+  export interface LoaderContext {
+    userLoader: UserLoader;
+    userByEmailLoader: UserByEmailLoader;
+    conversationLoader: ConversationLoader;
+    userConversationsLoader: UserConversationsLoader;
+    audioLoader: AudioLoader;
+    subscriptionLoader: SubscriptionLoader;
+  }
+  
+  export function createLoaderContext(): LoaderContext {
+    return {
+      userLoader: new UserLoader(),
+      userByEmailLoader: new UserByEmailLoader(),
+      conversationLoader: new ConversationLoader(),
+      userConversationsLoader: new UserConversationsLoader(),
+      audioLoader: new AudioLoader(),
+      subscriptionLoader: new SubscriptionLoader()
+    };
+  }
+  
+  // Middleware to attach loaders to request
+  export const loaderMiddleware = (
+    req: Request & { loaders?: LoaderContext },
+    res: Response,
+    next: NextFunction
+  ) => {
+    req.loaders = createLoaderContext();
+    next();
+  };
+  ```
+
+### 4. Optimize Service Layer Queries
+- [ ] Update `/check/src/services/conversation-service.ts`:
+  ```typescript
+  export class ConversationService {
+    async getConversationWithDetails(
+      conversationId: string,
+      loaders: LoaderContext
+    ): Promise<ConversationWithDetails> {
+      // Single query with joins instead of multiple queries
+      const result = await queryOne<ConversationWithDetails>(`
+        SELECT 
+          c.*,
+          u.email as user_email,
+          u.name as user_name,
+          COUNT(DISTINCT a.id) as audio_count,
+          SUM(a.duration) as total_duration,
+          MAX(a.created_at) as last_audio_at,
+          json_agg(
+            json_build_object(
+              'id', a.id,
+              'status', a.status,
+              'duration', a.duration,
+              'created_at', a.created_at
+            ) ORDER BY a.created_at
+          ) FILTER (WHERE a.id IS NOT NULL) as audios
+        FROM conversations c
+        JOIN users u ON u.id = c.user_id
+        LEFT JOIN audios a ON a.conversation_id = c.id
+        WHERE c.id = $1
+        GROUP BY c.id, u.email, u.name
+      `, [conversationId]);
+      
+      return result;
+    }
+    
+    async getUserConversationStats(
+      userId: string,
+      dateRange?: { start: Date; end: Date }
+    ): Promise<ConversationStats> {
+      // Use window functions for efficient stats
+      const stats = await queryOne<ConversationStats>(`
+        WITH conversation_data AS (
+          SELECT 
+            c.id,
+            c.mode,
+            c.status,
+            c.created_at,
+            c.duration,
+            c.analysis->>'sentiment' as sentiment,
+            c.analysis->>'mood' as mood,
+            COUNT(*) OVER (PARTITION BY c.mode) as mode_count,
+            COUNT(*) OVER (PARTITION BY DATE(c.created_at)) as daily_count,
+            AVG(c.duration) OVER () as avg_duration,
+            ROW_NUMBER() OVER (ORDER BY c.created_at DESC) as recency_rank
+          FROM conversations c
+          WHERE c.user_id = $1
+            AND ($2::timestamp IS NULL OR c.created_at >= $2)
+            AND ($3::timestamp IS NULL OR c.created_at <= $3)
+        )
+        SELECT 
+          COUNT(*) as total_conversations,
+          COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_conversations,
+          COUNT(DISTINCT DATE(created_at)) as active_days,
+          AVG(duration) as avg_duration,
+          MAX(created_at) as last_conversation_at,
+          json_build_object(
+            'therapy', COUNT(CASE WHEN mode = 'therapy' THEN 1 END),
+            'coaching', COUNT(CASE WHEN mode = 'coaching' THEN 1 END),
+            'interview', COUNT(CASE WHEN mode = 'interview' THEN 1 END)
+          ) as mode_distribution,
+          json_build_object(
+            'positive', COUNT(CASE WHEN sentiment = 'positive' THEN 1 END),
+            'neutral', COUNT(CASE WHEN sentiment = 'neutral' THEN 1 END),
+            'negative', COUNT(CASE WHEN sentiment = 'negative' THEN 1 END)
+          ) as sentiment_distribution
+        FROM conversation_data
+      `, [userId, dateRange?.start, dateRange?.end]);
+      
+      return stats;
+    }
+  }
+  ```
+
+### 5. Implement Query Batching
+- [ ] Create `/check/src/utils/query-batcher.ts`:
+  ```typescript
+  export class QueryBatcher {
+    private batches = new Map<string, {
+      query: string;
+      params: any[];
+      resolvers: Array<{
+        resolve: (value: any) => void;
+        reject: (error: any) => void;
+      }>;
+      timeout: NodeJS.Timeout;
+    }>();
+    
+    private batchDelay = 10; // ms
+    private maxBatchSize = 100;
+    
+    async batch<T>(
+      key: string,
+      query: string,
+      params: any[]
+    ): Promise<T> {
+      return new Promise((resolve, reject) => {
+        if (!this.batches.has(key)) {
+          const timeout = setTimeout(() => {
+            this.executeBatch(key);
+          }, this.batchDelay);
+          
+          this.batches.set(key, {
+            query,
+            params: [],
+            resolvers: [],
+            timeout
+          });
+        }
+        
+        const batch = this.batches.get(key)!;
+        batch.params.push(params);
+        batch.resolvers.push({ resolve, reject });
+        
+        if (batch.resolvers.length >= this.maxBatchSize) {
+          clearTimeout(batch.timeout);
+          this.executeBatch(key);
+        }
+      });
+    }
+    
+    private async executeBatch(key: string): Promise<void> {
+      const batch = this.batches.get(key);
+      if (!batch) return;
+      
+      this.batches.delete(key);
+      
+      try {
+        // Execute batched query
+        const results = await this.executeBatchedQuery(
+          batch.query,
+          batch.params
+        );
+        
+        // Resolve all promises
+        batch.resolvers.forEach((resolver, index) => {
+          resolver.resolve(results[index]);
+        });
+      } catch (error) {
+        // Reject all promises
+        batch.resolvers.forEach(resolver => {
+          resolver.reject(error);
+        });
+      }
+    }
+    
+    private async executeBatchedQuery(
+      baseQuery: string,
+      paramsList: any[][]
+    ): Promise<any[]> {
+      // Convert individual queries into a single batched query
+      // This is a simplified example - actual implementation would be more complex
+      const batchedQuery = `
+        WITH batch_params AS (
+          SELECT * FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY AS t(params, ord)
+        )
+        ${baseQuery}
+      `;
+      
+      const results = await query(batchedQuery, [JSON.stringify(paramsList)]);
+      return results;
+    }
+  }
+  ```
+
+### 6. Create Database Views for Complex Queries
+- [ ] Create `/check/src/database/migrations/003_create_views.sql`:
+  ```sql
+  -- User activity summary view
+  CREATE MATERIALIZED VIEW user_activity_summary AS
+  SELECT 
+    u.id as user_id,
+    u.email,
+    u.created_at as user_created_at,
+    COUNT(DISTINCT c.id) as total_conversations,
+    COUNT(DISTINCT CASE WHEN c.status = 'completed' THEN c.id END) as completed_conversations,
+    COUNT(DISTINCT DATE(c.created_at)) as active_days,
+    MAX(c.created_at) as last_activity_at,
+    AVG(c.duration) as avg_conversation_duration,
+    SUM(c.duration) as total_conversation_duration,
+    COUNT(DISTINCT c.mode) as modes_used,
+    jsonb_object_agg(
+      c.mode, 
+      COUNT(c.id)
+    ) FILTER (WHERE c.mode IS NOT NULL) as mode_counts,
+    COALESCE(s.status, 'none') as subscription_status,
+    s.expires_at as subscription_expires_at
+  FROM users u
+  LEFT JOIN conversations c ON c.user_id = u.id
+  LEFT JOIN LATERAL (
+    SELECT status, expires_at 
+    FROM subscriptions 
+    WHERE user_id = u.id 
+    ORDER BY created_at DESC 
+    LIMIT 1
+  ) s ON true
+  GROUP BY u.id, u.email, u.created_at, s.status, s.expires_at;
+  
+  CREATE UNIQUE INDEX idx_user_activity_summary_user_id ON user_activity_summary(user_id);
+  CREATE INDEX idx_user_activity_summary_last_activity ON user_activity_summary(last_activity_at DESC);
+  
+  -- Conversation search view with full-text search
+  CREATE MATERIALIZED VIEW conversation_search AS
+  SELECT 
+    c.id,
+    c.user_id,
+    c.mode,
+    c.status,
+    c.created_at,
+    c.transcript,
+    c.analysis,
+    to_tsvector('english', COALESCE(c.transcript, '')) || 
+    to_tsvector('english', COALESCE(c.analysis->>'summary', '')) as search_vector,
+    array_agg(a.transcript) FILTER (WHERE a.transcript IS NOT NULL) as audio_transcripts
+  FROM conversations c
+  LEFT JOIN audios a ON a.conversation_id = c.id
+  GROUP BY c.id;
+  
+  CREATE INDEX idx_conversation_search_vector ON conversation_search USING gin(search_vector);
+  CREATE INDEX idx_conversation_search_user_id ON conversation_search(user_id);
+  
+  -- Refresh views periodically
+  CREATE OR REPLACE FUNCTION refresh_materialized_views()
+  RETURNS void AS $$
+  BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY user_activity_summary;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY conversation_search;
+  END;
+  $$ LANGUAGE plpgsql;
+  ```
+
+### 7. Implement Query Performance Monitoring
+- [ ] Create `/check/src/monitoring/query-monitor.ts`:
+  ```typescript
+  export class QueryMonitor {
+    private slowQueryThreshold = 1000; // 1 second
+    private queryStats = new Map<string, {
+      count: number;
+      totalTime: number;
+      maxTime: number;
+      lastSeen: Date;
+    }>();
+    
+    async trackQuery<T>(
+      sql: string,
+      params: any[],
+      executeFn: () => Promise<T>
+    ): Promise<T> {
+      const start = Date.now();
+      const queryHash = this.hashQuery(sql);
+      
+      try {
+        const result = await executeFn();
+        const duration = Date.now() - start;
+        
+        this.updateStats(queryHash, duration);
+        
+        if (duration > this.slowQueryThreshold) {
+          await this.logSlowQuery(sql, params, duration);
+        }
+        
+        return result;
+      } catch (error) {
+        const duration = Date.now() - start;
+        await this.logQueryError(sql, params, duration, error);
+        throw error;
+      }
+    }
+    
+    private updateStats(queryHash: string, duration: number): void {
+      const existing = this.queryStats.get(queryHash) || {
+        count: 0,
+        totalTime: 0,
+        maxTime: 0,
+        lastSeen: new Date()
+      };
+      
+      this.queryStats.set(queryHash, {
+        count: existing.count + 1,
+        totalTime: existing.totalTime + duration,
+        maxTime: Math.max(existing.maxTime, duration),
+        lastSeen: new Date()
+      });
+    }
+    
+    private async logSlowQuery(
+      sql: string,
+      params: any[],
+      duration: number
+    ): Promise<void> {
+      // Log to monitoring service
+      log.warn('Slow query detected', {
+        sql: sql.substring(0, 200), // Truncate for logging
+        params: params.length,
+        duration,
+        threshold: this.slowQueryThreshold
+      });
+      
+      // Store for analysis
+      await run(`
+        INSERT INTO slow_query_log (query_hash, query_text, duration, params_count, created_at)
+        VALUES ($1, $2, $3, $4, NOW())
+      `, [this.hashQuery(sql), sql, duration, params.length]);
+    }
+    
+    async getQueryStats(): Promise<QueryStats[]> {
+      return Array.from(this.queryStats.entries()).map(([hash, stats]) => ({
+        queryHash: hash,
+        executionCount: stats.count,
+        avgDuration: stats.totalTime / stats.count,
+        maxDuration: stats.maxTime,
+        lastSeen: stats.lastSeen
+      }));
+    }
+    
+    private hashQuery(sql: string): string {
+      // Normalize query for hashing (remove whitespace, parameters)
+      const normalized = sql
+        .replace(/\s+/g, ' ')
+        .replace(/\$\d+/g, '?')
+        .trim();
+        
+      return crypto
+        .createHash('md5')
+        .update(normalized)
+        .digest('hex');
+    }
+  }
+  ```
+
+### 8. Implement Query Optimization Hints
+- [ ] Create `/check/src/database/query-optimizer.ts`:
+  ```typescript
+  export class QueryOptimizer {
+    // Add query hints for PostgreSQL
+    addHints(sql: string, hints: QueryHints): string {
+      const hintComments = [];
+      
+      if (hints.indexes) {
+        hintComments.push(`IndexScan(${hints.indexes.join(' ')})`);
+      }
+      
+      if (hints.joins) {
+        hintComments.push(`${hints.joins.type}Join(${hints.joins.tables.join(' ')})`);
+      }
+      
+      if (hints.parallel) {
+        hintComments.push(`Parallel(${hints.parallel})`);
+      }
+      
+      if (hintComments.length > 0) {
+        return `/*+ ${hintComments.join(' ')} */ ${sql}`;
+      }
+      
+      return sql;
+    }
+    
+    // Analyze query plan
+    async analyzeQuery(sql: string, params: any[]): Promise<QueryPlan> {
+      const planQuery = `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`;
+      const result = await query(planQuery, params);
+      return result[0]['QUERY PLAN'][0];
+    }
+    
+    // Suggest optimizations
+    async suggestOptimizations(sql: string): Promise<Optimization[]> {
+      const plan = await this.analyzeQuery(sql, []);
+      const suggestions: Optimization[] = [];
+      
+      // Check for sequential scans on large tables
+      if (plan['Plan']['Node Type'] === 'Seq Scan' && plan['Plan']['Rows'] > 1000) {
+        suggestions.push({
+          type: 'index',
+          message: `Consider adding index on ${plan['Plan']['Relation Name']}`,
+          impact: 'high'
+        });
+      }
+      
+      // Check for missing join conditions
+      if (plan['Plan']['Join Type'] === 'Nested Loop' && plan['Plan']['Rows'] > 10000) {
+        suggestions.push({
+          type: 'join',
+          message: 'Consider using hash join for large datasets',
+          impact: 'medium'
+        });
+      }
+      
+      return suggestions;
+    }
+  }
+  ```
+
+### 9. Implement Pagination Optimization
+- [ ] Create `/check/src/utils/pagination.ts`:
+  ```typescript
+  export class CursorPagination {
+    static encode(cursor: any): string {
+      return Buffer.from(JSON.stringify(cursor)).toString('base64');
+    }
+    
+    static decode(cursor: string): any {
+      return JSON.parse(Buffer.from(cursor, 'base64').toString());
+    }
+    
+    static async paginate<T>(options: {
+      query: string;
+      params: any[];
+      limit: number;
+      cursor?: string;
+      orderBy: string;
+      cursorColumn: string;
+    }): Promise<PaginatedResult<T>> {
+      const { query, params, limit, cursor, orderBy, cursorColumn } = options;
+      
+      let whereClause = '';
+      let queryParams = [...params];
+      
+      if (cursor) {
+        const decodedCursor = this.decode(cursor);
+        whereClause = `AND ${cursorColumn} < $${queryParams.length + 1}`;
+        queryParams.push(decodedCursor.value);
+      }
+      
+      // Add 1 to limit to check if there are more results
+      const paginatedQuery = `
+        ${query}
+        ${whereClause}
+        ORDER BY ${orderBy}
+        LIMIT ${limit + 1}
+      `;
+      
+      const results = await query<T>(paginatedQuery, queryParams);
+      
+      const hasMore = results.length > limit;
+      const items = hasMore ? results.slice(0, -1) : results;
+      
+      const nextCursor = hasMore && items.length > 0
+        ? this.encode({ 
+            value: items[items.length - 1][cursorColumn] 
+          })
+        : null;
+      
+      return {
+        items,
+        pageInfo: {
+          hasNextPage: hasMore,
+          endCursor: nextCursor
+        }
+      };
+    }
+  }
+  
+  // Usage example
+  const conversations = await CursorPagination.paginate<Conversation>({
+    query: 'SELECT * FROM conversations WHERE user_id = $1',
+    params: [userId],
+    limit: 20,
+    cursor: request.cursor,
+    orderBy: 'created_at DESC',
+    cursorColumn: 'created_at'
+  });
+  ```
+
+### 10. Testing Query Optimizations
+- [ ] Create `/check/src/database/__tests__/query-optimization.test.ts`:
+  ```typescript
+  describe('Query Optimization', () => {
+    describe('DataLoader', () => {
+      it('should batch user queries', async () => {
+        const userLoader = new UserLoader();
+        const spy = jest.spyOn(db, 'query');
+        
+        // Request multiple users
+        const promises = [
+          userLoader.load('user1'),
+          userLoader.load('user2'),
+          userLoader.load('user3')
+        ];
+        
+        const users = await Promise.all(promises);
+        
+        // Should make only one query
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy).toHaveBeenCalledWith(
+          'SELECT * FROM users WHERE id = ANY($1)',
+          [['user1', 'user2', 'user3']]
+        );
+      });
+      
+      it('should cache loaded values', async () => {
+        const userLoader = new UserLoader();
+        
+        // First load
+        const user1 = await userLoader.load('user1');
+        
+        // Second load should use cache
+        const spy = jest.spyOn(db, 'query');
+        const user1Again = await userLoader.load('user1');
+        
+        expect(spy).not.toHaveBeenCalled();
+        expect(user1Again).toBe(user1);
+      });
+    });
+    
+    describe('Query Performance', () => {
+      it('should use indexes for user queries', async () => {
+        const plan = await queryOptimizer.analyzeQuery(
+          'SELECT * FROM users WHERE email = $1',
+          ['test@example.com']
+        );
+        
+        expect(plan['Plan']['Node Type']).toBe('Index Scan');
+        expect(plan['Plan']['Index Name']).toBe('idx_users_email');
+      });
+      
+      it('should optimize conversation queries', async () => {
+        const before = Date.now();
+        await conversationService.getUserConversationStats('user1');
+        const duration = Date.now() - before;
+        
+        expect(duration).toBeLessThan(100); // Should be fast
+      });
+    });
+  });
+  ```
+
+## Acceptance Criteria
+- [ ] No N+1 queries in application
+- [ ] All queries use appropriate indexes
+- [ ] DataLoader pattern implemented
+- [ ] Query monitoring in place
+- [ ] Slow queries logged and optimized
+- [ ] Pagination working efficiently
+- [ ] Materialized views refreshing properly
+
+## Performance Targets
+- Simple queries: < 10ms
+- Complex queries: < 100ms
+- Batch operations: < 200ms
+- No query > 1 second
+- Index usage > 95%
+
+## Monitoring Dashboard
+- Query execution time histogram
+- Slow query log
+- Index usage statistics
+- Cache hit rates for DataLoaders
+- Database connection pool metrics

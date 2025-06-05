@@ -14,6 +14,9 @@ import {
 	removeClientFromUser,
 	setPingInterval,
 	setWss,
+	updateClientActivity,
+	startCleanupInterval,
+	stopCleanupInterval,
 } from "./state";
 
 const PING_INTERVAL_MS = 30000; // 30 seconds
@@ -41,10 +44,12 @@ function setupClientListeners(
 	const clientIp = getClientIp(req); // Use helper function
 
 	ws.on("pong", () => {
-		ws.isAlive = true;
+		updateClientActivity(ws);
 	});
 
 	ws.on("message", async (message) => {
+		// Update activity on any message
+		updateClientActivity(ws);
 		try {
 			const rawMessage = message.toString();
 			let parsedData: unknown;
@@ -189,6 +194,12 @@ function setupConnectionListener(wss: WebSocketServer): void {
 		ws.isAuthenticating = true;
 		ws.userId = undefined;
 		ws.subscribedTopics = ws.subscribedTopics || new Set(); // Ensure set exists
+		
+		// Set connection metadata for memory management
+		const now = Date.now();
+		ws.connectedAt = now;
+		ws.lastActivity = now;
+		ws.connectionId = `ws_${Date.now()}_${Math.random().toString(36).substring(2)}`;
 
 		// Set authentication timeout - setTimeout returns NodeJS.Timeout
 		const authTimeout = setTimeout(() => {
@@ -277,6 +288,7 @@ export function initialize(server: Server, path = "/ws"): void {
 
 	setupConnectionListener(newWss);
 	startPingInterval();
+	startCleanupInterval();
 }
 
 export function handleUpgrade(
@@ -297,8 +309,17 @@ export function handleUpgrade(
 		client.subscribedTopics = new Set();
 		client.isAuthenticating = true;
 		client.userId = undefined;
+		
+		// Set connection metadata for memory management
+		const now = Date.now();
+		client.connectedAt = now;
+		client.lastActivity = now;
+		client.connectionId = `ws_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+		
 		const clientIp = getClientIp(req); // Use helper
-		log.debug(`WebSocket upgrade successful for IP: ${clientIp}`);
+		log.debug(`WebSocket upgrade successful for IP: ${clientIp}`, {
+			connectionId: client.connectionId
+		});
 		wss.emit("connection", client, req); // Emit connection event for the listener
 	});
 }
@@ -306,6 +327,7 @@ export function handleUpgrade(
 export function shutdown(): void {
 	log.info("Shutting down WebSocket Manager...");
 	stopPingInterval();
+	stopCleanupInterval();
 
 	const wss = getWss();
 	if (wss) {

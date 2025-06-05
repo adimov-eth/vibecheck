@@ -1,0 +1,781 @@
+# Implement Frontend Testing Suite
+
+## Priority: HIGH
+## Timeline: Day 4-5 of Week 5
+## Dependencies: Test infrastructure, React Native Testing Library
+
+## Overview
+Create comprehensive testing suite for the React Native frontend including component tests, hook tests, integration tests, and E2E tests using Detox.
+
+## Tasks
+
+### 1. Set Up React Native Testing Environment
+- [ ] Install testing dependencies:
+  ```bash
+  cd vibe
+  pnpm add --dev \
+    @testing-library/react-native \
+    @testing-library/jest-native \
+    @testing-library/react-hooks \
+    react-test-renderer \
+    jest-expo \
+    detox \
+    @types/detox \
+    msw \
+    @mswjs/data
+  ```
+- [ ] Update `/vibe/jest.config.js`:
+  ```javascript
+  module.exports = {
+    preset: 'jest-expo',
+    setupFilesAfterEnv: [
+      '@testing-library/jest-native/extend-expect',
+      '<rootDir>/src/test/setup.ts'
+    ],
+    transformIgnorePatterns: [
+      'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg)'
+    ],
+    moduleNameMapper: {
+      '^@/(.*)$': '<rootDir>/$1'
+    },
+    collectCoverageFrom: [
+      '**/*.{ts,tsx}',
+      '!**/node_modules/**',
+      '!**/vendor/**',
+      '!**/*.d.ts',
+      '!**/test/**'
+    ],
+    coverageThreshold: {
+      global: {
+        branches: 70,
+        functions: 70,
+        lines: 70,
+        statements: 70
+      }
+    }
+  };
+  ```
+
+### 2. Create Test Setup and Utilities
+- [ ] Create `/vibe/test/setup.ts`:
+  ```typescript
+  import '@testing-library/jest-native/extend-expect';
+  import { cleanup } from '@testing-library/react-native';
+  import { server } from './mocks/server';
+  
+  // Mock expo modules
+  jest.mock('expo-av', () => ({
+    Audio: {
+      Recording: jest.fn(() => ({
+        prepareToRecordAsync: jest.fn(),
+        startAsync: jest.fn(),
+        stopAndUnloadAsync: jest.fn(),
+        getURI: jest.fn(() => 'mock-audio-uri'),
+        getStatusAsync: jest.fn(() => ({ isRecording: false }))
+      })),
+      setAudioModeAsync: jest.fn(),
+      getPermissionsAsync: jest.fn(() => ({ status: 'granted' })),
+      requestPermissionsAsync: jest.fn(() => ({ status: 'granted' }))
+    }
+  }));
+  
+  jest.mock('@react-native-async-storage/async-storage', () =>
+    require('@react-native-async-storage/async-storage/jest/async-storage-mock')
+  );
+  
+  // Setup MSW
+  beforeAll(() => server.listen());
+  afterEach(() => {
+    cleanup();
+    server.resetHandlers();
+  });
+  afterAll(() => server.close());
+  
+  // Mock navigation
+  jest.mock('@react-navigation/native', () => {
+    const actualNav = jest.requireActual('@react-navigation/native');
+    return {
+      ...actualNav,
+      useNavigation: () => ({
+        navigate: jest.fn(),
+        goBack: jest.fn(),
+        setOptions: jest.fn()
+      }),
+      useRoute: () => ({
+        params: {}
+      })
+    };
+  });
+  ```
+
+### 3. Create Mock Service Worker Setup
+- [ ] Create `/vibe/test/mocks/handlers.ts`:
+  ```typescript
+  import { rest } from 'msw';
+  
+  const API_URL = process.env.EXPO_PUBLIC_API_URL;
+  
+  export const handlers = [
+    // Auth endpoints
+    rest.post(`${API_URL}/auth/apple`, (req, res, ctx) => {
+      return res(
+        ctx.json({
+          success: true,
+          data: {
+            token: 'mock-jwt-token',
+            user: {
+              id: 'apple:mock-user',
+              email: 'test@example.com',
+              name: 'Test User'
+            }
+          }
+        })
+      );
+    }),
+    
+    // Conversation endpoints
+    rest.get(`${API_URL}/conversations`, (req, res, ctx) => {
+      return res(
+        ctx.json({
+          success: true,
+          data: {
+            conversations: [
+              {
+                id: 'conv-1',
+                mode: 'therapy',
+                status: 'completed',
+                createdAt: new Date().toISOString()
+              },
+              {
+                id: 'conv-2',
+                mode: 'coaching',
+                status: 'waiting',
+                createdAt: new Date().toISOString()
+              }
+            ],
+            pageInfo: {
+              hasNextPage: false,
+              endCursor: null
+            }
+          }
+        })
+      );
+    }),
+    
+    rest.post(`${API_URL}/conversations`, (req, res, ctx) => {
+      const { mode, recordingType } = req.body as any;
+      return res(
+        ctx.json({
+          success: true,
+          data: {
+            conversation: {
+              id: 'new-conv-id',
+              mode,
+              recordingType,
+              status: 'waiting',
+              createdAt: new Date().toISOString()
+            }
+          }
+        })
+      );
+    })
+  ];
+  ```
+
+### 4. Create Component Tests
+- [ ] Create `/vibe/components/__tests__/RecordButton.test.tsx`:
+  ```typescript
+  import React from 'react';
+  import { render, fireEvent, waitFor } from '@testing-library/react-native';
+  import { RecordButton } from '../recording/RecordButton';
+  
+  describe('RecordButton', () => {
+    const mockOnStart = jest.fn();
+    const mockOnStop = jest.fn();
+    
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+    
+    it('should render correctly', () => {
+      const { getByTestId } = render(
+        <RecordButton onStart={mockOnStart} onStop={mockOnStop} />
+      );
+      
+      expect(getByTestId('record-button')).toBeTruthy();
+      expect(getByTestId('record-icon')).toBeTruthy();
+    });
+    
+    it('should start recording on press', async () => {
+      const { getByTestId } = render(
+        <RecordButton onStart={mockOnStart} onStop={mockOnStop} />
+      );
+      
+      const button = getByTestId('record-button');
+      fireEvent.press(button);
+      
+      await waitFor(() => {
+        expect(mockOnStart).toHaveBeenCalledTimes(1);
+      });
+    });
+    
+    it('should show recording state', () => {
+      const { getByTestId, rerender } = render(
+        <RecordButton 
+          isRecording={false}
+          onStart={mockOnStart} 
+          onStop={mockOnStop} 
+        />
+      );
+      
+      expect(getByTestId('record-button')).toHaveStyle({
+        backgroundColor: '#FF6B6B'
+      });
+      
+      rerender(
+        <RecordButton 
+          isRecording={true}
+          onStart={mockOnStart} 
+          onStop={mockOnStop} 
+        />
+      );
+      
+      expect(getByTestId('record-button')).toHaveStyle({
+        backgroundColor: '#4ECDC4'
+      });
+      expect(getByTestId('recording-indicator')).toBeTruthy();
+    });
+    
+    it('should stop recording on second press', async () => {
+      const { getByTestId } = render(
+        <RecordButton 
+          isRecording={true}
+          onStart={mockOnStart} 
+          onStop={mockOnStop} 
+        />
+      );
+      
+      fireEvent.press(getByTestId('record-button'));
+      
+      await waitFor(() => {
+        expect(mockOnStop).toHaveBeenCalledTimes(1);
+      });
+    });
+    
+    it('should be disabled when prop is set', () => {
+      const { getByTestId } = render(
+        <RecordButton 
+          disabled={true}
+          onStart={mockOnStart} 
+          onStop={mockOnStop} 
+        />
+      );
+      
+      const button = getByTestId('record-button');
+      fireEvent.press(button);
+      
+      expect(mockOnStart).not.toHaveBeenCalled();
+      expect(button).toHaveStyle({ opacity: 0.5 });
+    });
+  });
+  ```
+
+- [ ] Create `/vibe/components/__tests__/ConversationCard.test.tsx`:
+  ```typescript
+  describe('ConversationCard', () => {
+    const mockConversation: Conversation = {
+      id: 'test-conv',
+      mode: 'therapy',
+      status: 'completed',
+      createdAt: '2024-01-01T10:00:00Z',
+      duration: 300,
+      analysis: {
+        summary: 'Test summary',
+        sentiment: 'positive'
+      }
+    };
+    
+    it('should display conversation details', () => {
+      const { getByText, getByTestId } = render(
+        <ConversationCard conversation={mockConversation} />
+      );
+      
+      expect(getByText('Therapy Session')).toBeTruthy();
+      expect(getByText('5 minutes')).toBeTruthy();
+      expect(getByTestId('sentiment-indicator')).toHaveStyle({
+        backgroundColor: '#4ECDC4' // positive color
+      });
+    });
+    
+    it('should handle press event', () => {
+      const mockOnPress = jest.fn();
+      const { getByTestId } = render(
+        <ConversationCard 
+          conversation={mockConversation}
+          onPress={mockOnPress}
+        />
+      );
+      
+      fireEvent.press(getByTestId('conversation-card'));
+      expect(mockOnPress).toHaveBeenCalledWith(mockConversation);
+    });
+    
+    it('should show loading state', () => {
+      const loadingConv = { ...mockConversation, status: 'transcribing' };
+      const { getByTestId } = render(
+        <ConversationCard conversation={loadingConv} />
+      );
+      
+      expect(getByTestId('loading-indicator')).toBeTruthy();
+      expect(getByText('Processing...')).toBeTruthy();
+    });
+  });
+  ```
+
+### 5. Create Hook Tests
+- [ ] Create `/vibe/hooks/__tests__/useRecording.test.ts`:
+  ```typescript
+  import { renderHook, act } from '@testing-library/react-hooks';
+  import { useRecording } from '../useRecording';
+  import * as RecordingService from '@/services/recordingService';
+  
+  jest.mock('@/services/recordingService');
+  
+  describe('useRecording', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+    
+    it('should initialize with default state', () => {
+      const { result } = renderHook(() => useRecording());
+      
+      expect(result.current.isRecording).toBe(false);
+      expect(result.current.duration).toBe(0);
+      expect(result.current.audioUri).toBeNull();
+      expect(result.current.error).toBeNull();
+    });
+    
+    it('should start recording', async () => {
+      const mockRecording = { mock: 'recording' };
+      (RecordingService.startRecording as jest.Mock).mockResolvedValue(mockRecording);
+      
+      const { result } = renderHook(() => useRecording());
+      
+      await act(async () => {
+        await result.current.startRecording();
+      });
+      
+      expect(RecordingService.checkPermissions).toHaveBeenCalled();
+      expect(RecordingService.setupAudioMode).toHaveBeenCalled();
+      expect(RecordingService.startRecording).toHaveBeenCalled();
+      expect(result.current.isRecording).toBe(true);
+    });
+    
+    it('should handle permission denied', async () => {
+      (RecordingService.checkPermissions as jest.Mock).mockResolvedValue(false);
+      
+      const { result } = renderHook(() => useRecording());
+      
+      await act(async () => {
+        await result.current.startRecording();
+      });
+      
+      expect(result.current.error).toBe('Microphone permission denied');
+      expect(result.current.isRecording).toBe(false);
+    });
+    
+    it('should stop recording and return URI', async () => {
+      const mockUri = 'file://mock-audio.m4a';
+      (RecordingService.stopRecording as jest.Mock).mockResolvedValue(mockUri);
+      
+      const { result } = renderHook(() => useRecording());
+      
+      // Start first
+      await act(async () => {
+        result.current.isRecording = true;
+        result.current.recordingInstance = { mock: 'recording' };
+      });
+      
+      // Then stop
+      await act(async () => {
+        const uri = await result.current.stopRecording();
+        expect(uri).toBe(mockUri);
+      });
+      
+      expect(result.current.isRecording).toBe(false);
+      expect(result.current.audioUri).toBe(mockUri);
+    });
+    
+    it('should update duration while recording', async () => {
+      jest.useFakeTimers();
+      
+      const { result } = renderHook(() => useRecording());
+      
+      await act(async () => {
+        await result.current.startRecording();
+      });
+      
+      expect(result.current.duration).toBe(0);
+      
+      act(() => {
+        jest.advanceTimersByTime(5000);
+      });
+      
+      expect(result.current.duration).toBe(5);
+      
+      jest.useRealTimers();
+    });
+  });
+  ```
+
+- [ ] Create `/vibe/hooks/__tests__/useConversation.test.ts`:
+  ```typescript
+  describe('useConversation', () => {
+    it('should create and fetch conversation', async () => {
+      const { result } = renderHook(() => useConversation());
+      
+      await act(async () => {
+        const conversationId = await result.current.createConversation(
+          'therapy',
+          'separate'
+        );
+        expect(conversationId).toBe('new-conv-id');
+      });
+      
+      expect(result.current.conversation).toMatchObject({
+        id: 'new-conv-id',
+        mode: 'therapy',
+        status: 'waiting'
+      });
+    });
+    
+    it('should handle API errors', async () => {
+      server.use(
+        rest.post(`${API_URL}/conversations`, (req, res, ctx) => {
+          return res(
+            ctx.status(500),
+            ctx.json({ error: 'Server error' })
+          );
+        })
+      );
+      
+      const { result } = renderHook(() => useConversation());
+      
+      await act(async () => {
+        try {
+          await result.current.createConversation('therapy', 'separate');
+        } catch (error) {
+          expect(error).toBeDefined();
+        }
+      });
+      
+      expect(result.current.error).toBeTruthy();
+      expect(result.current.conversation).toBeNull();
+    });
+  });
+  ```
+
+### 6. Create Integration Tests
+- [ ] Create `/vibe/test/integration/recording-flow.test.tsx`:
+  ```typescript
+  describe('Recording Flow Integration', () => {
+    it('should complete recording and upload flow', async () => {
+      const { getByTestId, getByText } = render(<RecordingScreen />);
+      
+      // Start recording
+      const recordButton = getByTestId('record-button');
+      fireEvent.press(recordButton);
+      
+      await waitFor(() => {
+        expect(getByTestId('recording-timer')).toBeTruthy();
+      });
+      
+      // Wait for recording
+      await act(async () => {
+        jest.advanceTimersByTime(3000);
+      });
+      
+      // Stop recording
+      fireEvent.press(recordButton);
+      
+      await waitFor(() => {
+        expect(getByText('Processing...')).toBeTruthy();
+      });
+      
+      // Verify upload started
+      await waitFor(() => {
+        expect(mockUploadService.uploadAudio).toHaveBeenCalledWith(
+          expect.stringContaining('file://'),
+          expect.any(String)
+        );
+      });
+      
+      // Verify navigation to results
+      await waitFor(() => {
+        expect(mockNavigation.navigate).toHaveBeenCalledWith(
+          'results',
+          { conversationId: expect.any(String) }
+        );
+      });
+    });
+  });
+  ```
+
+### 7. Create Snapshot Tests
+- [ ] Create `/vibe/components/__tests__/__snapshots__/`:
+  ```typescript
+  describe('Component Snapshots', () => {
+    it('should match ConversationList snapshot', () => {
+      const conversations = [
+        ConversationFactory.build({ status: 'completed' }),
+        ConversationFactory.build({ status: 'waiting' })
+      ];
+      
+      const tree = renderer.create(
+        <ConversationList conversations={conversations} />
+      ).toJSON();
+      
+      expect(tree).toMatchSnapshot();
+    });
+    
+    it('should match ResultsView snapshot', () => {
+      const analysis = {
+        summary: 'Test summary',
+        sentiment: 'positive',
+        keyPoints: ['Point 1', 'Point 2'],
+        recommendations: ['Rec 1', 'Rec 2']
+      };
+      
+      const tree = renderer.create(
+        <ResultsView analysis={analysis} />
+      ).toJSON();
+      
+      expect(tree).toMatchSnapshot();
+    });
+  });
+  ```
+
+### 8. Create E2E Tests with Detox
+- [ ] Configure Detox in `/vibe/.detoxrc.js`:
+  ```javascript
+  module.exports = {
+    testRunner: {
+      args: {
+        $0: 'jest',
+        config: 'e2e/jest.config.js'
+      },
+      jest: {
+        setupFilesAfterEnv: ['<rootDir>/e2e/setup.ts']
+      }
+    },
+    apps: {
+      'ios.debug': {
+        type: 'ios.app',
+        binaryPath: 'ios/build/Build/Products/Debug-iphonesimulator/VibeCheck.app',
+        build: 'xcodebuild -workspace ios/VibeCheck.xcworkspace -scheme VibeCheck -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build'
+      },
+      'android.debug': {
+        type: 'android.apk',
+        binaryPath: 'android/app/build/outputs/apk/debug/app-debug.apk',
+        build: 'cd android && ./gradlew assembleDebug assembleAndroidTest -DtestBuildType=debug'
+      }
+    },
+    devices: {
+      simulator: {
+        type: 'ios.simulator',
+        device: {
+          type: 'iPhone 14'
+        }
+      },
+      emulator: {
+        type: 'android.emulator',
+        device: {
+          avdName: 'Pixel_6_API_33'
+        }
+      }
+    },
+    configurations: {
+      'ios.sim.debug': {
+        device: 'simulator',
+        app: 'ios.debug'
+      },
+      'android.emu.debug': {
+        device: 'emulator',
+        app: 'android.debug'
+      }
+    }
+  };
+  ```
+
+- [ ] Create `/vibe/e2e/auth.e2e.ts`:
+  ```typescript
+  describe('Authentication E2E', () => {
+    beforeAll(async () => {
+      await device.launchApp();
+    });
+    
+    beforeEach(async () => {
+      await device.reloadReactNative();
+    });
+    
+    it('should show login screen on first launch', async () => {
+      await expect(element(by.id('welcome-screen'))).toBeVisible();
+      await expect(element(by.id('apple-signin-button'))).toBeVisible();
+    });
+    
+    it('should complete Apple Sign In flow', async () => {
+      await element(by.id('apple-signin-button')).tap();
+      
+      // Mock Apple Sign In (requires test environment setup)
+      await device.sendUserNotification({
+        trigger: {
+          type: 'appleSignIn',
+          value: 'success'
+        }
+      });
+      
+      await waitFor(element(by.id('home-screen')))
+        .toBeVisible()
+        .withTimeout(5000);
+      
+      await expect(element(by.text('Welcome back!'))).toBeVisible();
+    });
+  });
+  ```
+
+- [ ] Create `/vibe/e2e/recording.e2e.ts`:
+  ```typescript
+  describe('Recording E2E', () => {
+    beforeAll(async () => {
+      await device.launchApp({ permissions: { microphone: 'YES' } });
+      await loginTestUser();
+    });
+    
+    it('should complete recording flow', async () => {
+      // Navigate to recording
+      await element(by.id('tab-recording')).tap();
+      await expect(element(by.id('recording-screen'))).toBeVisible();
+      
+      // Select mode
+      await element(by.id('mode-therapy')).tap();
+      
+      // Start recording
+      await element(by.id('record-button')).tap();
+      await expect(element(by.id('recording-timer'))).toBeVisible();
+      
+      // Wait 3 seconds
+      await waitFor(element(by.text('0:03')))
+        .toBeVisible()
+        .withTimeout(4000);
+      
+      // Stop recording
+      await element(by.id('record-button')).tap();
+      
+      // Wait for upload
+      await waitFor(element(by.id('upload-progress')))
+        .toBeVisible()
+        .withTimeout(2000);
+      
+      // Wait for results
+      await waitFor(element(by.id('results-screen')))
+        .toBeVisible()
+        .withTimeout(30000);
+      
+      // Verify results displayed
+      await expect(element(by.id('analysis-summary'))).toBeVisible();
+      await expect(element(by.id('sentiment-display'))).toBeVisible();
+    });
+  });
+  ```
+
+### 9. Create Performance Tests
+- [ ] Create `/vibe/test/performance/render.test.tsx`:
+  ```typescript
+  describe('Component Performance', () => {
+    it('should render large conversation list efficiently', async () => {
+      const conversations = Array.from({ length: 100 }, (_, i) =>
+        ConversationFactory.build({ id: `conv-${i}` })
+      );
+      
+      const start = performance.now();
+      
+      const { getByTestId } = render(
+        <ConversationList conversations={conversations} />
+      );
+      
+      const renderTime = performance.now() - start;
+      
+      expect(renderTime).toBeLessThan(100); // 100ms max
+      expect(getByTestId('conversation-list')).toBeTruthy();
+      
+      // Test scroll performance
+      const list = getByTestId('conversation-list');
+      
+      const scrollStart = performance.now();
+      fireEvent.scroll(list, {
+        nativeEvent: {
+          contentOffset: { y: 5000 },
+          contentSize: { height: 10000 },
+          layoutMeasurement: { height: 800 }
+        }
+      });
+      const scrollTime = performance.now() - scrollStart;
+      
+      expect(scrollTime).toBeLessThan(16); // 60fps = 16ms per frame
+    });
+  });
+  ```
+
+### 10. Test Coverage Scripts
+- [ ] Update `/vibe/package.json`:
+  ```json
+  {
+    "scripts": {
+      "test": "jest",
+      "test:watch": "jest --watch",
+      "test:coverage": "jest --coverage",
+      "test:components": "jest components/",
+      "test:hooks": "jest hooks/",
+      "test:integration": "jest test/integration",
+      "test:e2e:ios": "detox test --configuration ios.sim.debug",
+      "test:e2e:android": "detox test --configuration android.emu.debug",
+      "test:e2e:build:ios": "detox build --configuration ios.sim.debug",
+      "test:e2e:build:android": "detox build --configuration android.emu.debug"
+    }
+  }
+  ```
+
+## Acceptance Criteria
+- [ ] 80% code coverage for components
+- [ ] 90% code coverage for hooks
+- [ ] All critical user flows have E2E tests
+- [ ] Tests run in < 3 minutes (excluding E2E)
+- [ ] E2E tests run on both iOS and Android
+- [ ] Snapshot tests for UI consistency
+- [ ] Performance benchmarks established
+
+## Test Organization
+```
+vibe/
+├── components/
+│   └── __tests__/
+├── hooks/
+│   └── __tests__/
+├── test/
+│   ├── setup.ts
+│   ├── factories/
+│   ├── mocks/
+│   ├── integration/
+│   └── performance/
+├── e2e/
+│   ├── setup.ts
+│   ├── helpers/
+│   └── flows/
+└── coverage/
+```
+
+## CI Integration
+- Run unit tests on every commit
+- Run integration tests on PR
+- Run E2E tests on merge to main
+- Block deployment if coverage drops below threshold

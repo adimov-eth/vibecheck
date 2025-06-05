@@ -9,9 +9,12 @@ import type { NextFunction, Request, Response } from "express";
 import helmet from "helmet";
 import multer from "multer";
 import audioRoutes from "./routes/audio";
+import authRoutes from "./routes/auth";
 import conversationRoutes from "./routes/conversation";
+import debugRoutes from "./routes/debug";
 import subscriptionRoutes from "./routes/subscription";
 import userRoutes from "./routes/user"; // Import user routes
+import * as adminJwtRoutes from "./routes/admin-jwt-routes";
 
 // Create Express app
 export const app = express();
@@ -63,9 +66,16 @@ app.get("/health", (_, res) => {
 
 // Routes
 app.use("/users", userRoutes); // Mount the user router - NO global requireAuth here
+app.use("/auth", authRoutes); // Auth routes (CAPTCHA, unlock, etc.)
 app.use("/audio", audioRoutes);
 app.use("/conversations", conversationRoutes);
 app.use("/subscriptions", subscriptionRoutes);
+app.use("/debug", debugRoutes); // Debug endpoints (development only)
+
+// Admin routes
+app.get("/admin/jwt/keys", adminJwtRoutes.listKeys);
+app.post("/admin/jwt/keys/revoke", adminJwtRoutes.revokeKey);
+app.post("/admin/jwt/keys/rotate", adminJwtRoutes.rotateKeys);
 
 // 404 handler
 app.use((_, res) => {

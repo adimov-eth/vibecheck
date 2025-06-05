@@ -1,0 +1,807 @@
+# Build Comprehensive Test Infrastructure
+
+## Priority: HIGH
+## Timeline: Day 1-3 of Week 5
+## Dependencies: Basic auth tests completed
+
+## Overview
+Establish robust test infrastructure with unit tests, integration tests, and E2E tests. Achieve 80% code coverage and implement continuous testing practices.
+
+## Tasks
+
+### 1. Set Up Test Framework and Tools
+- [ ] Install testing dependencies:
+  ```bash
+  cd check
+  bun add --dev \
+    jest @types/jest \
+    @jest/globals \
+    jest-extended \
+    jest-mock-extended \
+    supertest @types/supertest \
+    nock @types/nock \
+    faker @faker-js/faker
+  ```
+- [ ] Create `/check/jest.config.js`:
+  ```javascript
+  module.exports = {
+    preset: 'ts-jest',
+    testEnvironment: 'node',
+    roots: ['<rootDir>/src'],
+    testMatch: [
+      '**/__tests__/**/*.test.ts',
+      '**/*.spec.ts'
+    ],
+    collectCoverageFrom: [
+      'src/**/*.ts',
+      '!src/**/*.d.ts',
+      '!src/**/__tests__/**',
+      '!src/test/**'
+    ],
+    coverageThreshold: {
+      global: {
+        branches: 80,
+        functions: 80,
+        lines: 80,
+        statements: 80
+      }
+    },
+    setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
+    moduleNameMapper: {
+      '^@/(.*)$': '<rootDir>/src/$1'
+    },
+    globals: {
+      'ts-jest': {
+        tsconfig: {
+          allowJs: true
+        }
+      }
+    }
+  };
+  ```
+
+### 2. Create Test Utilities and Helpers
+- [ ] Create `/check/src/test/factories/user.factory.ts`:
+  ```typescript
+  import { faker } from '@faker-js/faker';
+  import { User } from '@/types';
+  
+  export class UserFactory {
+    static build(overrides: Partial<User> = {}): User {
+      return {
+        id: faker.string.uuid(),
+        email: faker.internet.email(),
+        name: faker.person.fullName(),
+        createdAt: faker.date.past(),
+        updatedAt: faker.date.recent(),
+        ...overrides
+      };
+    }
+    
+    static async create(overrides: Partial<User> = {}): Promise<User> {
+      const user = this.build(overrides);
+      await run(
+        'INSERT INTO users (id, email, name, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)',
+        [user.id, user.email, user.name, user.createdAt, user.updatedAt]
+      );
+      return user;
+    }
+    
+    static buildMany(count: number, overrides: Partial<User> = {}): User[] {
+      return Array.from({ length: count }, () => this.build(overrides));
+    }
+  }
+  ```
+
+- [ ] Create `/check/src/test/factories/conversation.factory.ts`:
+  ```typescript
+  export class ConversationFactory {
+    static build(overrides: Partial<Conversation> = {}): Conversation {
+      return {
+        id: faker.string.uuid(),
+        userId: faker.string.uuid(),
+        mode: faker.helpers.arrayElement(['therapy', 'coaching', 'interview']),
+        recordingType: faker.helpers.arrayElement(['separate', 'live']),
+        status: 'waiting',
+        duration: faker.number.int({ min: 60, max: 3600 }),
+        transcript: faker.lorem.paragraphs(3),
+        analysis: {
+          summary: faker.lorem.paragraph(),
+          sentiment: faker.helpers.arrayElement(['positive', 'neutral', 'negative']),
+          keyPoints: faker.lorem.sentences(3).split('.').filter(s => s.trim())
+        },
+        createdAt: faker.date.past(),
+        updatedAt: faker.date.recent(),
+        ...overrides
+      };
+    }
+    
+    static async create(overrides: Partial<Conversation> = {}): Promise<Conversation> {
+      const conversation = this.build(overrides);
+      // Insert into database
+      return conversation;
+    }
+  }
+  ```
+
+### 3. Create Test Database Management
+- [ ] Create `/check/src/test/database.ts`:
+  ```typescript
+  export class TestDatabase {
+    private static instance: TestDatabase;
+    private pool: Pool;
+    
+    static async getInstance(): Promise<TestDatabase> {
+      if (!this.instance) {
+        this.instance = new TestDatabase();
+        await this.instance.initialize();
+      }
+      return this.instance;
+    }
+    
+    private async initialize(): Promise<void> {
+      // Create test database if not exists
+      const adminPool = new Pool({
+        connectionString: process.env.DATABASE_URL?.replace(/\/[^/]+$/, '/postgres')
+      });
+      
+      try {
+        await adminPool.query('CREATE DATABASE vibecheck_test');
+      } catch (error) {
+        // Database already exists
+      }
+      
+      await adminPool.end();
+      
+      // Connect to test database
+      this.pool = new Pool({
+        connectionString: process.env.TEST_DATABASE_URL
+      });
+      
+      // Run migrations
+      await this.runMigrations();
+    }
+    
+    async clean(): Promise<void> {
+      // Truncate all tables
+      await this.pool.query(`
+        TRUNCATE TABLE 
+          users, conversations, audios, subscriptions, sessions 
+        CASCADE
+      `);
+    }
+    
+    async seed(): Promise<SeedData> {
+      // Create test data
+      const users = await Promise.all(
+        UserFactory.buildMany(5).map(u => UserFactory.create(u))
+      );
+      
+      const conversations = await Promise.all(
+        users.flatMap(user => 
+          ConversationFactory.buildMany(3, { userId: user.id })
+            .map(c => ConversationFactory.create(c))
+        )
+      );
+      
+      return { users, conversations };
+    }
+    
+    async close(): Promise<void> {
+      await this.pool.end();
+    }
+  }
+  ```
+
+### 4. Create Mock Services
+- [ ] Create `/check/src/test/mocks/openai.mock.ts`:
+  ```typescript
+  export class MockOpenAIService {
+    transcribeAudio = jest.fn().mockResolvedValue({
+      text: 'This is a mock transcription of the audio file.'
+    });
+    
+    analyzeConversation = jest.fn().mockImplementation(async (transcript: string) => {
+      return {
+        summary: 'Mock analysis summary',
+        sentiment: 'positive',
+        mood: 'calm',
+        keyPoints: ['Point 1', 'Point 2', 'Point 3'],
+        recommendations: ['Recommendation 1', 'Recommendation 2']
+      };
+    });
+    
+    generateResponse = jest.fn().mockImplementation(async (prompt: string) => {
+      return 'Mock AI response to: ' + prompt;
+    });
+  }
+  
+  export const mockOpenAI = new MockOpenAIService();
+  ```
+
+- [ ] Create `/check/src/test/mocks/redis.mock.ts`:
+  ```typescript
+  export class MockRedisClient {
+    private store = new Map<string, any>();
+    private expiries = new Map<string, number>();
+    
+    async get(key: string): Promise<string | null> {
+      this.checkExpiry(key);
+      return this.store.get(key) || null;
+    }
+    
+    async set(key: string, value: string): Promise<void> {
+      this.store.set(key, value);
+    }
+    
+    async setEx(key: string, seconds: number, value: string): Promise<void> {
+      this.store.set(key, value);
+      this.expiries.set(key, Date.now() + seconds * 1000);
+    }
+    
+    async del(keys: string | string[]): Promise<void> {
+      const keysArray = Array.isArray(keys) ? keys : [keys];
+      keysArray.forEach(key => {
+        this.store.delete(key);
+        this.expiries.delete(key);
+      });
+    }
+    
+    async keys(pattern: string): Promise<string[]> {
+      const regex = new RegExp(pattern.replace('*', '.*'));
+      return Array.from(this.store.keys()).filter(key => regex.test(key));
+    }
+    
+    private checkExpiry(key: string): void {
+      const expiry = this.expiries.get(key);
+      if (expiry && expiry < Date.now()) {
+        this.store.delete(key);
+        this.expiries.delete(key);
+      }
+    }
+    
+    clear(): void {
+      this.store.clear();
+      this.expiries.clear();
+    }
+  }
+  ```
+
+### 5. Create Service Layer Tests
+- [ ] Create `/check/src/services/__tests__/conversation-service.test.ts`:
+  ```typescript
+  describe('ConversationService', () => {
+    let conversationService: ConversationService;
+    let testDb: TestDatabase;
+    let mockOpenAI: MockOpenAIService;
+    
+    beforeAll(async () => {
+      testDb = await TestDatabase.getInstance();
+      mockOpenAI = new MockOpenAIService();
+      conversationService = new ConversationService(mockOpenAI);
+    });
+    
+    beforeEach(async () => {
+      await testDb.clean();
+      jest.clearAllMocks();
+    });
+    
+    describe('createConversation', () => {
+      it('should create a new conversation', async () => {
+        const user = await UserFactory.create();
+        
+        const conversation = await conversationService.create({
+          userId: user.id,
+          mode: 'therapy',
+          recordingType: 'separate'
+        });
+        
+        expect(conversation).toMatchObject({
+          id: expect.any(String),
+          userId: user.id,
+          mode: 'therapy',
+          recordingType: 'separate',
+          status: 'waiting'
+        });
+        
+        // Verify in database
+        const saved = await conversationService.getById(conversation.id);
+        expect(saved).toEqual(conversation);
+      });
+      
+      it('should validate user exists', async () => {
+        await expect(
+          conversationService.create({
+            userId: 'non-existent',
+            mode: 'therapy',
+            recordingType: 'separate'
+          })
+        ).rejects.toThrow('User not found');
+      });
+      
+      it('should validate mode', async () => {
+        const user = await UserFactory.create();
+        
+        await expect(
+          conversationService.create({
+            userId: user.id,
+            mode: 'invalid' as any,
+            recordingType: 'separate'
+          })
+        ).rejects.toThrow('Invalid mode');
+      });
+    });
+    
+    describe('processConversation', () => {
+      it('should process conversation with transcription and analysis', async () => {
+        const { conversation, audios } = await createTestConversation();
+        
+        await conversationService.processConversation(conversation.id);
+        
+        // Verify OpenAI was called
+        expect(mockOpenAI.transcribeAudio).toHaveBeenCalledTimes(audios.length);
+        expect(mockOpenAI.analyzeConversation).toHaveBeenCalledOnce();
+        
+        // Verify conversation updated
+        const updated = await conversationService.getById(conversation.id);
+        expect(updated.status).toBe('completed');
+        expect(updated.transcript).toBeTruthy();
+        expect(updated.analysis).toBeTruthy();
+      });
+      
+      it('should handle processing errors gracefully', async () => {
+        const conversation = await ConversationFactory.create();
+        mockOpenAI.transcribeAudio.mockRejectedValueOnce(new Error('API Error'));
+        
+        await conversationService.processConversation(conversation.id);
+        
+        const updated = await conversationService.getById(conversation.id);
+        expect(updated.status).toBe('failed');
+        expect(updated.errorMessage).toContain('API Error');
+      });
+    });
+  });
+  ```
+
+### 6. Create API Route Tests
+- [ ] Create `/check/src/api/routes/__tests__/conversation.route.test.ts`:
+  ```typescript
+  describe('Conversation Routes', () => {
+    let app: Application;
+    let testDb: TestDatabase;
+    let authToken: string;
+    let testUser: User;
+    
+    beforeAll(async () => {
+      testDb = await TestDatabase.getInstance();
+      app = createTestApp();
+      
+      // Create test user and auth token
+      testUser = await UserFactory.create();
+      authToken = await createTestToken(testUser.id);
+    });
+    
+    describe('GET /conversations', () => {
+      it('should return user conversations', async () => {
+        // Create test conversations
+        const conversations = await Promise.all([
+          ConversationFactory.create({ userId: testUser.id }),
+          ConversationFactory.create({ userId: testUser.id })
+        ]);
+        
+        const response = await request(app)
+          .get('/conversations')
+          .set('Authorization', `Bearer ${authToken}`);
+        
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.conversations).toHaveLength(2);
+        expect(response.body.data.conversations[0]).toMatchObject({
+          id: conversations[0].id,
+          mode: conversations[0].mode
+        });
+      });
+      
+      it('should paginate results', async () => {
+        // Create 25 conversations
+        await Promise.all(
+          Array.from({ length: 25 }, () => 
+            ConversationFactory.create({ userId: testUser.id })
+          )
+        );
+        
+        const response = await request(app)
+          .get('/conversations?limit=10')
+          .set('Authorization', `Bearer ${authToken}`);
+        
+        expect(response.body.data.conversations).toHaveLength(10);
+        expect(response.body.data.pageInfo.hasNextPage).toBe(true);
+        expect(response.body.data.pageInfo.endCursor).toBeTruthy();
+      });
+      
+      it('should require authentication', async () => {
+        const response = await request(app)
+          .get('/conversations');
+        
+        expect(response.status).toBe(401);
+      });
+    });
+    
+    describe('POST /conversations/:id/audio', () => {
+      it('should upload audio file', async () => {
+        const conversation = await ConversationFactory.create({ 
+          userId: testUser.id 
+        });
+        
+        const response = await request(app)
+          .post(`/conversations/${conversation.id}/audio`)
+          .set('Authorization', `Bearer ${authToken}`)
+          .attach('audio', 'test/fixtures/sample.mp3');
+        
+        expect(response.status).toBe(201);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.audio).toMatchObject({
+          conversationId: conversation.id,
+          status: 'uploaded'
+        });
+      });
+      
+      it('should validate file type', async () => {
+        const conversation = await ConversationFactory.create({ 
+          userId: testUser.id 
+        });
+        
+        const response = await request(app)
+          .post(`/conversations/${conversation.id}/audio`)
+          .set('Authorization', `Bearer ${authToken}`)
+          .attach('audio', 'test/fixtures/document.pdf');
+        
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('Invalid file type');
+      });
+    });
+  });
+  ```
+
+### 7. Create WebSocket Tests
+- [ ] Create `/check/src/utils/websocket/__tests__/websocket.test.ts`:
+  ```typescript
+  import { WebSocket } from 'ws';
+  
+  describe('WebSocket', () => {
+    let server: Server;
+    let wsUrl: string;
+    
+    beforeAll(async () => {
+      server = await createTestServer();
+      const port = (server.address() as any).port;
+      wsUrl = `ws://localhost:${port}/ws`;
+    });
+    
+    afterAll(async () => {
+      await new Promise(resolve => server.close(resolve));
+    });
+    
+    describe('Connection', () => {
+      it('should establish connection with valid token', async () => {
+        const token = await createTestToken('user123');
+        const ws = new WebSocket(wsUrl, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        await new Promise((resolve, reject) => {
+          ws.on('open', resolve);
+          ws.on('error', reject);
+        });
+        
+        expect(ws.readyState).toBe(WebSocket.OPEN);
+        ws.close();
+      });
+      
+      it('should reject connection without token', async () => {
+        const ws = new WebSocket(wsUrl);
+        
+        await expect(new Promise((resolve, reject) => {
+          ws.on('open', () => reject(new Error('Should not connect')));
+          ws.on('error', resolve);
+        })).resolves.toBeTruthy();
+      });
+    });
+    
+    describe('Messaging', () => {
+      it('should receive conversation updates', async () => {
+        const userId = 'user123';
+        const token = await createTestToken(userId);
+        const ws = new WebSocket(wsUrl, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        await new Promise(resolve => ws.on('open', resolve));
+        
+        // Subscribe to conversation
+        ws.send(JSON.stringify({
+          type: 'subscribe',
+          topic: 'conversation:conv123'
+        }));
+        
+        // Wait for subscription confirmation
+        const confirmMessage = await new Promise<any>(resolve => {
+          ws.on('message', (data) => {
+            const message = JSON.parse(data.toString());
+            if (message.type === 'subscribed') {
+              resolve(message);
+            }
+          });
+        });
+        
+        expect(confirmMessage.topic).toBe('conversation:conv123');
+        
+        // Simulate conversation update
+        await publishConversationUpdate('conv123', {
+          status: 'completed',
+          analysis: { summary: 'Test' }
+        });
+        
+        // Should receive update
+        const updateMessage = await new Promise<any>(resolve => {
+          ws.on('message', (data) => {
+            const message = JSON.parse(data.toString());
+            if (message.type === 'conversation.updated') {
+              resolve(message);
+            }
+          });
+        });
+        
+        expect(updateMessage.conversationId).toBe('conv123');
+        expect(updateMessage.data.status).toBe('completed');
+        
+        ws.close();
+      });
+    });
+  });
+  ```
+
+### 8. Create E2E Tests
+- [ ] Create `/check/e2e/conversation-flow.e2e.ts`:
+  ```typescript
+  describe('E2E: Conversation Flow', () => {
+    let app: Application;
+    let testUser: User;
+    let authToken: string;
+    
+    beforeAll(async () => {
+      app = await createTestApp();
+      testUser = await createE2EUser();
+      authToken = await authenticateUser(testUser);
+    });
+    
+    it('should complete full conversation flow', async () => {
+      // 1. Create conversation
+      const createResponse = await request(app)
+        .post('/conversations')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          mode: 'therapy',
+          recordingType: 'separate'
+        });
+      
+      expect(createResponse.status).toBe(201);
+      const conversationId = createResponse.body.data.conversation.id;
+      
+      // 2. Connect WebSocket
+      const ws = new WebSocket(`ws://localhost:3001/ws`, {
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      
+      await new Promise(resolve => ws.on('open', resolve));
+      
+      // Subscribe to updates
+      ws.send(JSON.stringify({
+        type: 'subscribe',
+        topic: `conversation:${conversationId}`
+      }));
+      
+      // 3. Upload audio
+      const audioResponse = await request(app)
+        .post(`/conversations/${conversationId}/audio`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .attach('audio', 'e2e/fixtures/test-audio.mp3');
+      
+      expect(audioResponse.status).toBe(201);
+      
+      // 4. Wait for processing via WebSocket
+      const updates: any[] = [];
+      ws.on('message', (data) => {
+        updates.push(JSON.parse(data.toString()));
+      });
+      
+      // Wait for completion
+      await waitFor(() => {
+        const completed = updates.find(u => 
+          u.type === 'conversation.completed'
+        );
+        expect(completed).toBeTruthy();
+      }, { timeout: 30000 });
+      
+      // 5. Verify final state
+      const finalResponse = await request(app)
+        .get(`/conversations/${conversationId}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      
+      expect(finalResponse.body.data.conversation).toMatchObject({
+        status: 'completed',
+        transcript: expect.any(String),
+        analysis: expect.objectContaining({
+          summary: expect.any(String),
+          sentiment: expect.any(String)
+        })
+      });
+      
+      ws.close();
+    });
+  });
+  ```
+
+### 9. Create Performance Tests
+- [ ] Create `/check/src/test/performance/load.test.ts`:
+  ```typescript
+  describe('Performance Tests', () => {
+    it('should handle concurrent conversation creation', async () => {
+      const users = await Promise.all(
+        Array.from({ length: 10 }, () => UserFactory.create())
+      );
+      
+      const start = Date.now();
+      
+      // Create 100 conversations concurrently
+      const promises = users.flatMap(user =>
+        Array.from({ length: 10 }, () =>
+          conversationService.create({
+            userId: user.id,
+            mode: 'therapy',
+            recordingType: 'separate'
+          })
+        )
+      );
+      
+      const conversations = await Promise.all(promises);
+      const duration = Date.now() - start;
+      
+      expect(conversations).toHaveLength(100);
+      expect(duration).toBeLessThan(5000); // Should complete in 5 seconds
+      
+      // Verify all created successfully
+      conversations.forEach(conv => {
+        expect(conv.id).toBeTruthy();
+        expect(conv.status).toBe('waiting');
+      });
+    });
+    
+    it('should handle high query load', async () => {
+      // Create test data
+      const { users, conversations } = await testDb.seed();
+      
+      const queries = Array.from({ length: 1000 }, (_, i) => ({
+        userId: users[i % users.length].id,
+        conversationId: conversations[i % conversations.length].id
+      }));
+      
+      const start = Date.now();
+      
+      // Execute queries with DataLoader
+      const loaders = createLoaderContext();
+      const results = await Promise.all(
+        queries.map(q => loaders.conversationLoader.load(q.conversationId))
+      );
+      
+      const duration = Date.now() - start;
+      
+      expect(results.filter(r => r !== null)).toHaveLength(1000);
+      expect(duration).toBeLessThan(1000); // 1ms per query average
+    });
+  });
+  ```
+
+### 10. Set Up Test Coverage and Reporting
+- [ ] Create `/check/package.json` scripts:
+  ```json
+  {
+    "scripts": {
+      "test": "jest",
+      "test:watch": "jest --watch",
+      "test:coverage": "jest --coverage",
+      "test:unit": "jest --testPathPattern=__tests__",
+      "test:integration": "jest --testPathPattern=\\.integration\\.test",
+      "test:e2e": "jest --testPathPattern=e2e",
+      "test:performance": "jest --testPathPattern=performance",
+      "test:ci": "jest --ci --coverage --maxWorkers=2"
+    }
+  }
+  ```
+
+- [ ] Create GitHub Actions test workflow:
+  ```yaml
+  # .github/workflows/test.yml
+  name: Test Suite
+  
+  on:
+    push:
+      branches: [main, develop]
+    pull_request:
+      branches: [main]
+  
+  jobs:
+    test:
+      runs-on: ubuntu-latest
+      
+      services:
+        postgres:
+          image: postgres:15
+          env:
+            POSTGRES_PASSWORD: postgres
+          options: >-
+            --health-cmd pg_isready
+            --health-interval 10s
+            --health-timeout 5s
+            --health-retries 5
+        
+        redis:
+          image: redis:7
+          options: >-
+            --health-cmd "redis-cli ping"
+            --health-interval 10s
+            --health-timeout 5s
+            --health-retries 5
+      
+      steps:
+        - uses: actions/checkout@v4
+        
+        - uses: oven-sh/setup-bun@v1
+          with:
+            bun-version: latest
+        
+        - name: Install dependencies
+          run: bun install
+        
+        - name: Run tests
+          run: bun run test:ci
+          env:
+            DATABASE_URL: postgresql://postgres:postgres@localhost/vibecheck_test
+            REDIS_URL: redis://localhost:6379
+        
+        - name: Upload coverage
+          uses: codecov/codecov-action@v3
+          with:
+            file: ./coverage/lcov.info
+  ```
+
+## Acceptance Criteria
+- [ ] 80% code coverage achieved
+- [ ] All critical paths have tests
+- [ ] Tests run in < 2 minutes
+- [ ] E2E tests cover main user flows
+- [ ] Performance tests establish baselines
+- [ ] CI pipeline runs all tests
+- [ ] Test failures block deployment
+
+## Test Organization
+```
+src/
+├── __tests__/           # Unit tests next to source
+├── test/
+│   ├── setup.ts         # Global test setup
+│   ├── factories/       # Test data factories
+│   ├── mocks/          # Mock implementations
+│   ├── fixtures/       # Test files and data
+│   └── utils/          # Test helpers
+├── integration/        # Integration tests
+├── e2e/               # End-to-end tests
+└── performance/       # Performance tests
+```
+
+## Coverage Goals
+- Services: 90%+
+- Routes: 85%+
+- Utils: 80%+
+- Middleware: 95%+
+- Overall: 80%+

@@ -99,21 +99,30 @@ export class ExternalServiceError extends AppError {
  * Global error handler middleware
  */
 export const handleError = (
-  err: Error,
+  err: Error | unknown,
   _req: Request,
   res: Response,
   // _next: NextFunction
-): Response => {
+): Response | void => {
+  // Check if response has already been sent
+  if (res.headersSent) {
+    log.error("Error occurred after response was sent", { error: err });
+    return;
+  }
+  // Ensure err is an Error object
+  const error = err instanceof Error ? err : new Error(String(err));
+  
   // Log all errors
-  log.error("Error handled", { 
-    message: err.message, 
-    name: err.name, 
-    stack: (config.nodeEnv !== 'production' ? err.stack : undefined) // Only include stack in non-prod
+  log.error("Error handler called", { 
+    message: error.message, 
+    name: error.name, 
+    isAppError: error instanceof AppError,
+    stack: (config.nodeEnv !== 'production' ? error.stack : undefined) // Only include stack in non-prod
   });
   
   // Handle AppErrors
-  if (err instanceof AppError) {
-    const { statusCode, code, message, isOperational } = err;
+  if (error instanceof AppError) {
+    const { statusCode, code, message, isOperational } = error;
     
     // Only show error details in non-production environments or for operational errors
     const errorMessage = (!isOperational && config.nodeEnv === 'production') 
@@ -128,7 +137,7 @@ export const handleError = (
   }
 
   // Handle Express validation errors
-  if (err.name === 'SyntaxError' || (err as ExpressError).type === 'entity.parse.failed') {
+  if (error.name === 'SyntaxError' || (error as ExpressError).type === 'entity.parse.failed') {
     return res.status(400).json({ 
       success: false,
       error: ErrorCode.VALIDATION, 
@@ -140,6 +149,6 @@ export const handleError = (
   return res.status(500).json({ 
     success: false,
     error: ErrorCode.SERVER_ERROR, 
-    message: config.nodeEnv === 'production' ? 'An unexpected error occurred' : err.message 
+    message: config.nodeEnv === 'production' ? 'An unexpected error occurred' : error.message 
   });
 };

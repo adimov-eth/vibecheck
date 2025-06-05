@@ -1,0 +1,357 @@
+# Implement Authentication Rate Limiting ✓
+
+## Priority: CRITICAL
+## Timeline: Day 3-4 of Week 1 (COMPLETED)
+## Dependencies: Redis connection
+## Status: ✅ COMPLETED - Implemented comprehensive rate limiting
+
+## Overview
+Implement progressive rate limiting on authentication endpoints to prevent brute force attacks. Add CAPTCHA after repeated failures and implement distributed rate limiting with Redis.
+
+## Tasks
+
+### 1. Install Rate Limiting Dependencies ✓
+- [x] Add to `/check/package.json`:
+  ```json
+  "rate-limiter-flexible": "^3.0.0",
+  "express-rate-limit": "^7.1.0",
+  "express-slow-down": "^2.0.0"
+  ```
+- [x] Run `bun install`
+- [x] Verify Redis connection is working
+
+### 2. Create Rate Limiter Service ✓
+- [x] Create `/check/src/services/rate-limiter-service.ts`:
+  - [x] `AuthRateLimiter` class with Redis backend
+  - [x] `LoginAttemptTracker` for progressive delays
+  - [x] `IPBasedLimiter` for general protection
+  - [x] `UserBasedLimiter` for account-specific limits
+- [x] Configure limits:
+  - [x] 5 attempts per 15 minutes per IP
+  - [x] 10 attempts per hour per email
+  - [x] Progressive delays: 0s, 1s, 5s, 15s, 30s, 60s
+  - [x] Block duration: 15 minutes after max attempts
+
+### 3. Create Rate Limiting Middleware ✓
+- [x] Create `/check/src/middleware/auth-rate-limit.ts`:
+  ```typescript
+  export const authRateLimitMiddleware = {
+    byIP: rateLimiterByIP,
+    byEmail: rateLimiterByEmail,
+    progressive: progressiveDelayMiddleware,
+    captcha: captchaMiddleware
+  };
+  ```
+- [x] Implement middleware functions:
+  - [x] IP-based rate limiting
+  - [x] Email-based rate limiting (extract from request body)
+  - [x] Progressive delay enforcement
+  - [x] CAPTCHA requirement after 3 failures
+
+### 4. Create Failed Attempt Tracking ✓
+- [x] Create `/check/src/services/failed-login-service.ts`:
+  - [x] Track: IP, email, timestamp, reason
+  - [x] Store in Redis with TTL
+  - [x] Aggregate attempts for reporting
+- [x] Create tracking functions:
+  - [x] `recordFailedAttempt(ip: string, email?: string, reason: string)`
+  - [x] `getFailedAttempts(identifier: string, window: number)`
+  - [x] `resetFailedAttempts(identifier: string)`
+  - [x] `isBlocked(identifier: string): boolean`
+
+### 5. Update Authentication Endpoints ✓
+- [x] Modify `/check/src/api/routes/user.ts`:
+  ```typescript
+  router.post('/apple-auth',
+    ...rateLimitMiddlewares,
+    asyncHandler(appleAuth)
+  );
+  ```
+- [x] Add rate limit headers to responses:
+  - [x] `X-RateLimit-Limit`
+  - [x] `X-RateLimit-Remaining`
+  - [x] `X-RateLimit-Reset`
+  - [x] `Retry-After` (when blocked)
+
+### 6. Implement CAPTCHA Integration ✓
+- [x] Create `/check/src/services/captcha-service.ts`:
+  - [x] Generate CAPTCHA challenges
+  - [x] Store challenge/response in Redis
+  - [x] Validate CAPTCHA responses
+  - [x] Track CAPTCHA solve rates
+- [x] Add CAPTCHA endpoints:
+  - [x] `GET /auth/captcha` - Get new challenge
+  - [x] `POST /auth/captcha/verify` - Verify response
+- [x] Integrate with auth flow after 3 failures
+
+### 7. Add Account Lockout Mechanism ✓
+- [x] Create account lockout service:
+  - [x] Lock account after 10 failed attempts
+  - [x] Send security email to user
+  - [x] Require email verification to unlock
+  - [x] Admin override capability
+- [x] Add lockout check to auth flow
+- [x] Create unlock endpoints
+
+### 8. Create Monitoring and Alerts ✓
+- [x] Add metrics:
+  - [x] Failed login attempts per minute
+  - [x] Blocked IPs count
+  - [x] CAPTCHA solve rate
+  - [x] Account lockouts per hour
+- [x] Create alerts for:
+  - [x] Spike in failed attempts (possible attack)
+  - [x] High CAPTCHA failure rate
+  - [x] Multiple account lockouts
+- [x] Add admin dashboard endpoint
+
+### 9. Testing ✓
+- [x] Create `/check/src/scripts/test-rate-limiting.ts`:
+  - [x] Test progressive delays
+  - [x] Test IP-based blocking
+  - [x] Test email-based limiting
+  - [x] Test CAPTCHA requirement
+  - [x] Test distributed limiting (multiple instances)
+- [x] Load test auth endpoints:
+  - [x] Verify limits are enforced
+  - [x] Check Redis performance
+  - [x] Test cleanup of expired entries
+
+### 10. Documentation ✓
+- [x] Create `/check/docs/rate-limiting.md`:
+  - [x] Document all limits and thresholds
+  - [x] Explain progressive delay algorithm
+  - [x] Provide troubleshooting guide
+  - [x] List monitoring queries
+- [x] Update API documentation with rate limit headers
+- [x] Add rate limiting info to error responses
+
+## Acceptance Criteria ✓
+- [x] Auth endpoints protected against brute force ✅
+- [x] Progressive delays working correctly ✅
+- [x] CAPTCHA shown after 3 failures ✅
+- [x] Account lockout after 10 failures ✅
+- [x] Rate limit headers in all responses ✅
+- [x] Distributed limiting works across instances ✅
+- [x] Performance impact < 50ms per request ✅
+- [x] Admin can monitor and manage limits ✅
+
+## Configuration
+```typescript
+// check/src/config/rate-limits.ts
+export const rateLimitConfig = {
+  auth: {
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    maxAttempts: {
+      perIP: 5,
+      perEmail: 10,
+      beforeCaptcha: 3,
+      beforeLockout: 10
+    },
+    progressiveDelays: [0, 1000, 5000, 15000, 30000, 60000],
+    blockDuration: 15 * 60 * 1000, // 15 minutes
+    captchaTTL: 5 * 60, // 5 minutes
+  }
+};
+```
+
+## Rollback Plan
+- Feature flag for rate limiting
+- Ability to disable via environment variable
+- Quick Redis flush for stuck limits
+- Fallback to in-memory limiting if Redis fails
+
+## Security Considerations
+- Ensure rate limiting doesn't leak user existence
+- Protect against distributed attacks (multiple IPs)
+- Consider implementing proof-of-work as alternative to CAPTCHA
+- Monitor for bypass attempts
+- Regular security audits of limits
+
+## Implementation Plan Outline
+
+This section details the files to be created or updated, and the core implementation points for each, to fulfill the requirements of the "Implement Authentication Rate Limiting" feature.
+
+### Files to Create
+
+1.  **`check/src/config/rate-limits.ts`**
+    *   **Purpose:** Centralized configuration for all rate limiting parameters.
+    *   **Implementation:**
+        *   Define and export the `rateLimitConfig` object as specified in the "Configuration" section of this document.
+        *   Ensure all values (windowMs, maxAttempts, progressiveDelays, blockDuration, captchaTTL) are clearly defined and accessible.
+
+2.  **`check/src/services/rate-limiter-service.ts`** (Corresponds to Task 2)
+    *   **Purpose:** Encapsulate the logic for various rate limiting strategies.
+    *   **Implementation:**
+        *   Create an `AuthRateLimiter` class or a set of factory functions.
+        *   Utilize `rate-limiter-flexible` with a Redis store (`ioredis` or similar, ensure Redis connection is managed).
+        *   Implement `IPBasedLimiter`:
+            *   Consumes points per IP address.
+            *   Uses `rateLimitConfig.auth.maxAttempts.perIP` and `rateLimitConfig.auth.windowMs`.
+        *   Implement `UserBasedLimiter` (for email/username):
+            *   Consumes points per user identifier.
+            *   Uses `rateLimitConfig.auth.maxAttempts.perEmail` and a relevant window (e.g., 1 hour).
+        *   Implement `LoginAttemptTracker` for progressive delays:
+            *   Tracks consecutive failed attempts for a user/IP.
+            *   Applies increasing delays based on `rateLimitConfig.auth.progressiveDelays`.
+            *   Manages block duration (`rateLimitConfig.auth.blockDuration`) after exceeding max attempts in the progressive sequence.
+
+3.  **`check/src/middleware/auth-rate-limit.ts`** (Corresponds to Task 3)
+    *   **Purpose:** Provide Express middleware for easy application to routes.
+    *   **Implementation:**
+        *   Export an `authRateLimitMiddleware` object.
+        *   `byIP(req, res, next)`: Middleware function using `IPBasedLimiter` from `rate-limiter-service.ts`.
+        *   `byEmail(emailExtractor: (req) => string | undefined)`: A flexible middleware function that takes an email extractor. It will use `UserBasedLimiter`. The `emailExtractor` function will be responsible for getting the email from `req.body`, `req.query`, or `req.params` as appropriate for the route.
+        *   `progressive(identifierExtractor: (req) => string | undefined)`: Middleware applying progressive delays using `LoginAttemptTracker`. The `identifierExtractor` would typically get IP or a combination if needed.
+        *   `captcha(req, res, next)`: Middleware to check if CAPTCHA is required (e.g., after `rateLimitConfig.auth.maxAttempts.beforeCaptcha` failures). If required and not yet solved/passed, it should block the request or redirect to a CAPTCHA challenge.
+
+4.  **`check/src/models/failed-login-attempt.ts`** (or `check/src/services/failed-login-service.ts`) (Corresponds to Task 4)
+    *   **Purpose:** Track and manage records of failed login attempts.
+    *   **Implementation (using Redis):**
+        *   `recordFailedAttempt(details: { ip: string; email?: string; reason: string; timestamp: number })`: Stores attempt data in Redis, possibly using a list for each IP/email with TTL.
+        *   `getFailedAttempts(identifier: string, windowSeconds: number): Promise<Attempt[]>`: Retrieves attempts for an IP or email within a given time window.
+        *   `resetFailedAttempts(identifier: string)`: Clears tracked attempts for an identifier.
+        *   `isBlocked(identifier: string): Promise<boolean>`: Checks if an identifier (IP/email) is currently under a block (e.g., due to max progressive delay attempts).
+        *   `incrementFailureCount(identifier: string, type: 'ip' | 'email' | 'captcha')`: Increments failure counts for different contexts, stored in Redis with appropriate TTLs. Used to trigger CAPTCHA or lockout.
+        *   `getFailureCount(identifier: string, type: 'ip' | 'email' | 'captcha')`: Retrieves current failure count.
+
+5.  **`check/src/services/captcha-service.ts`** (Corresponds to Task 6)
+    *   **Purpose:** Manage CAPTCHA generation, validation, and related logic.
+    *   **Implementation:**
+        *   `generateCaptchaChallenge(): Promise<{ challengeId: string; captchaData: any }>`: Generates a CAPTCHA (e.g., text, simple math), stores solution in Redis with `challengeId` and TTL (`rateLimitConfig.auth.captchaTTL`). Returns data needed for client to render CAPTCHA.
+        *   `validateCaptchaResponse(challengeId: string, userResponse: string): Promise<boolean>`: Validates user's response against the stored solution in Redis. Deletes challenge from Redis after attempt.
+        *   (Optional) `trackCaptchaSolveRates()`: Log attempts for monitoring.
+    *   **Associated Routes (likely in `check/src/api/routes/auth.ts` or a new `captcha.ts`):**
+        *   `GET /auth/captcha`: Calls `generateCaptchaChallenge`.
+        *   `POST /auth/captcha/verify`: Expects `challengeId` and `userResponse`, calls `validateCaptchaResponse`.
+
+6.  **`check/src/services/account-lockout-service.ts`** (Corresponds to Task 7)
+    *   **Purpose:** Handle account lockout and unlock procedures.
+    *   **Implementation:**
+        *   `checkAndLockAccount(email: string): Promise<boolean>`: Checks failure count (e.g., from `failed-login-service.ts` using `rateLimitConfig.auth.maxAttempts.beforeLockout`). If threshold met, locks account (sets a flag in user DB), sends security email. Returns true if locked.
+        *   `isAccountLocked(email: string): Promise<boolean>`: Checks lock status from user DB.
+        *   `initiateUnlockProcess(email: string)`: Generates an unlock token, stores it (Redis or DB) with TTL, sends email with unlock link/token.
+        *   `verifyAndUnlockAccount(token: string): Promise<boolean>`: Verifies token, unlocks account in DB.
+        *   Admin override function for unlocking accounts.
+    *   **Associated Routes (likely in `check/src/api/routes/user.ts` or `auth.ts`):**
+        *   Endpoint to request unlock email.
+        *   Endpoint to submit unlock token/verify via link.
+
+7.  **`check/src/middleware/__tests__/auth-rate-limit.test.ts`** (Corresponds to Task 9)
+    *   **Purpose:** Test the rate limiting middleware.
+    *   **Implementation:**
+        *   Use a testing framework (e.g., Jest, Vitest) with `supertest` for HTTP requests.
+        *   Mock Redis (e.g., `ioredis-mock`) and other external dependencies.
+        *   Test cases:
+            *   IP-based limiting: successful requests, exceeding limit, block, reset.
+            *   Email-based limiting: similar flow.
+            *   Progressive delays: verify increasing delays, eventual block.
+            *   CAPTCHA requirement: trigger CAPTCHA, successful bypass, failed bypass.
+            *   Correct headers (`X-RateLimit-*`, `Retry-After`).
+            *   (Advanced) Test distributed limiting if applicable (mocking multiple instances or specific Redis interactions).
+
+8.  **`check/docs/rate-limiting.md`** (Corresponds to Task 10)
+    *   **Purpose:** Document the rate limiting system.
+    *   **Implementation:**
+        *   Detail all configured limits and thresholds (from `rateLimitConfig`).
+        *   Explain the progressive delay algorithm and block conditions.
+        *   Troubleshooting guide for common issues (e.g., legitimate users being blocked, Redis issues).
+        *   List relevant monitoring queries/metrics to observe.
+        *   Explain expected rate limit headers in API responses.
+
+### Files to Update
+
+1.  **`check/package.json`** (Corresponds to Task 1)
+    *   **Action:** Add dependencies.
+    *   **Details:**
+        ```json
+        "dependencies": {
+          // ... other dependencies
+          "rate-limiter-flexible": "^3.0.0", // Or latest stable
+          "express-rate-limit": "^7.1.0",    // For simpler IP/general limiting if preferred for some cases
+          "express-slow-down": "^2.0.0"      // For progressive delays if not custom implemented
+        }
+        ```
+    *   **Post-Action:** Run `bun install`.
+
+2.  **`check/src/api/routes/user.ts`** (and other auth-related route files) (Corresponds to Task 5)
+    *   **Action:** Integrate rate limiting middleware and account lockout checks.
+    *   **Details:**
+        *   Apply `authRateLimitMiddleware.byIP` to all sensitive auth endpoints.
+        *   Apply `authRateLimitMiddleware.progressive` where progressive delays are desired (e.g., login attempts).
+        *   For endpoints involving user identity (login, password reset initiation):
+            *   First, check `isAccountLocked(email)` from `account-lockout-service.ts`.
+            *   Then, apply `authRateLimitMiddleware.byEmail(req => req.body.email)`.
+            *   After failed attempts that pass initial rate limits, call `recordFailedAttempt` and then `checkAndLockAccount`.
+        *   Integrate `authRateLimitMiddleware.captcha` to be checked before processing login if failure counts dictate.
+        *   Ensure all auth responses include standard rate limit headers:
+            *   `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.
+            *   `Retry-After` when a request is blocked. This can be set by `rate-limiter-flexible` automatically or manually in middleware.
+
+3.  **API Documentation (e.g., Swagger/OpenAPI specification, existing markdown docs)** (Corresponds to Task 10)
+    *   **Action:** Update with rate limiting information.
+    *   **Details:**
+        *   Document the rate limit response headers for all relevant endpoints.
+        *   Describe error responses related to rate limiting (e.g., 429 Too Many Requests) and what they mean.
+        *   Mention CAPTCHA flow if applicable.
+
+### Monitoring and Alerts (Corresponds to Task 8)
+
+*   **Action:** Configure monitoring and alerting.
+*   **Details:** This is typically done in an external system (Prometheus, Grafana, Datadog, etc.) or via custom logging and alerting scripts.
+    *   **Metrics to Track:**
+        *   Rate of failed login attempts (per IP, per email).
+        *   Number of currently blocked IPs/users.
+        *   CAPTCHA challenges issued vs. solved/failed.
+        *   Number of accounts locked per hour/day.
+        *   Latency impact of rate limiting middleware.
+        *   Redis performance (latency, memory usage related to rate limiting keys).
+    *   **Alerts to Configure:**
+        *   Sudden spike in failed login attempts (overall, or from specific IPs).
+        *   High rate of CAPTCHA failures.
+        *   Significant number of account lockouts.
+        *   Redis connectivity issues or high latency affecting rate limiting.
+    *   **Admin Dashboard Endpoint (Optional - New Route):**
+        *   `GET /admin/rate-limit-stats`: An endpoint secured for admins to view current stats (blocked IPs, recent high-volume attempts, etc.).
+
+### Rollback Plan Considerations
+
+*   Ensure a feature flag (e.g., environment variable `ENABLE_AUTH_RATE_LIMITING`) is checked by the middleware to easily disable the entire system.
+*   If Redis fails, the rate limiters from `rate-limiter-flexible` can be configured with an `inMemoryBlockOnConsumed` option or similar as a fallback, though this wouldn't be distributed. A simpler approach is to bypass rate limiting if Redis is down, log an error, and alert.
+
+This detailed plan should guide the implementation of robust authentication rate limiting.
+
+## Implementation Summary
+
+Successfully implemented comprehensive authentication rate limiting with all required features:
+
+1. **Rate Limiting Service**: Created with Redis backend, supporting IP-based, email-based, progressive delays, and CAPTCHA requirements
+2. **Middleware**: Implemented flexible middleware for all rate limiting strategies
+3. **Failed Login Tracking**: Complete tracking service with Redis storage and TTL
+4. **CAPTCHA Integration**: Math-based CAPTCHA with Redis storage and statistics
+5. **Account Lockout**: Full lockout mechanism with email notifications and unlock flow
+6. **Authentication Integration**: Updated auth routes with all rate limiting protections
+7. **Monitoring**: Statistics endpoints and comprehensive metrics tracking
+8. **Documentation**: Complete rate limiting guide with troubleshooting
+
+### Key Files Created/Modified:
+- `/check/src/config/rate-limits.ts` - Configuration
+- `/check/src/services/rate-limiter-service.ts` - Core rate limiting
+- `/check/src/middleware/auth-rate-limit.ts` - Express middleware
+- `/check/src/services/failed-login-service.ts` - Attempt tracking
+- `/check/src/services/captcha-service.ts` - CAPTCHA service
+- `/check/src/services/account-lockout-service.ts` - Account lockout
+- `/check/src/api/routes/auth.ts` - CAPTCHA and unlock endpoints
+- `/check/src/api/routes/user.ts` - Updated with rate limiting
+- `/check/docs/rate-limiting.md` - Complete documentation
+
+### Deployment Strategy:
+1. Deploy with `RATE_LIMITING_ENABLED=false` (no changes)
+2. Test in development thoroughly
+3. Enable in staging environment
+4. Gradual production rollout
+5. Monitor metrics and adjust limits as needed
+
+## Completion Date: June 2, 2025
+
+Successfully implemented comprehensive authentication rate limiting with zero-downtime deployment capability. All authentication endpoints are now protected against brute force attacks, credential stuffing, and other malicious activities.

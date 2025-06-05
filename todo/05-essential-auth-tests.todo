@@ -1,0 +1,606 @@
+# Create Essential Authentication Tests
+
+## Priority: HIGH
+## Timeline: Day 7-8 of Week 1
+## Dependencies: Jest/Bun test setup
+
+## Overview
+Create comprehensive test suite for authentication system covering unit tests, integration tests, and security tests. Focus on critical auth paths and edge cases.
+
+## Tasks
+
+### 1. Set Up Test Infrastructure
+- [ ] Configure test environment in `/check/src/test/setup.ts`:
+  ```typescript
+  import { beforeAll, afterAll, beforeEach, afterEach } from 'bun:test';
+  
+  // Test database setup
+  export const setupTestDb = async () => {
+    process.env.DATABASE_URL = 'sqlite::memory:';
+    await runMigrations();
+  };
+  
+  // Mock Redis
+  export const setupMockRedis = () => {
+    const mockRedis = {
+      get: jest.fn(),
+      set: jest.fn(),
+      del: jest.fn(),
+      expire: jest.fn()
+    };
+    return mockRedis;
+  };
+  
+  // Global test setup
+  beforeAll(async () => {
+    await setupTestDb();
+  });
+  
+  afterEach(async () => {
+    await cleanupTestData();
+  });
+  ```
+
+### 2. Unit Tests for Apple Auth Verification
+- [ ] Create `/check/src/utils/__tests__/apple-auth.test.ts`:
+  ```typescript
+  describe('Apple Auth Verification', () => {
+    describe('verifyAppleToken', () => {
+      it('should verify valid Apple token', async () => {
+        const mockToken = createMockAppleToken({ sub: 'apple123' });
+        mockAppleKeyFetch();
+        
+        const result = await verifyAppleToken(mockToken);
+        
+        expect(result.success).toBe(true);
+        expect(result.data.userId).toBe('apple123');
+      });
+      
+      it('should reject expired token', async () => {
+        const mockToken = createMockAppleToken({ 
+          sub: 'apple123',
+          exp: Date.now() / 1000 - 3600 // 1 hour ago
+        });
+        
+        const result = await verifyAppleToken(mockToken);
+        
+        expect(result.success).toBe(false);
+        expect(result.error.message).toContain('expired');
+      });
+      
+      it('should reject token with invalid signature', async () => {
+        const mockToken = 'invalid.token.signature';
+        
+        const result = await verifyAppleToken(mockToken);
+        
+        expect(result.success).toBe(false);
+        expect(result.error.message).toContain('Invalid signature');
+      });
+      
+      it('should cache successful verification', async () => {
+        const mockToken = createMockAppleToken({ sub: 'apple123' });
+        
+        // First call
+        await verifyAppleToken(mockToken);
+        
+        // Second call should use cache
+        const result = await verifyAppleToken(mockToken);
+        
+        expect(mockRedis.get).toHaveBeenCalledWith(
+          expect.stringContaining('apple-auth-cache')
+        );
+      });
+    });
+  });
+  ```
+
+### 3. User Service Authentication Tests
+- [ ] Create `/check/src/services/__tests__/user-service.test.ts`:
+  ```typescript
+  describe('UserService - authenticateWithApple', () => {
+    it('should create new user on first login', async () => {
+      mockAppleTokenVerification({ 
+        sub: 'new-user',
+        email: 'new@example.com' 
+      });
+      
+      const result = await authenticateWithApple('mock-token');
+      
+      expect(result.success).toBe(true);
+      expect(result.data.id).toBe('apple:new-user');
+      expect(result.data.email).toBe('new@example.com');
+      
+      // Verify user was created in DB
+      const user = await getUser('apple:new-user');
+      expect(user).not.toBeNull();
+    });
+    
+    it('should handle existing user login', async () => {
+      // Create existing user
+      await createTestUser({
+        id: 'apple:existing',
+        email: 'existing@example.com'
+      });
+      
+      mockAppleTokenVerification({ 
+        sub: 'existing',
+        email: 'existing@example.com' 
+      });
+      
+      const result = await authenticateWithApple('mock-token');
+      
+      expect(result.success).toBe(true);
+      expect(result.data.id).toBe('apple:existing');
+    });
+    
+    it('should reject duplicate email with different Apple ID', async () => {
+      // Create user with email
+      await createTestUser({
+        id: 'apple:user1',
+        email: 'taken@example.com'
+      });
+      
+      // Try to login with different Apple ID but same email
+      mockAppleTokenVerification({ 
+        sub: 'user2',
+        email: 'taken@example.com' 
+      });
+      
+      const result = await authenticateWithApple('mock-token');
+      
+      expect(result.success).toBe(false);
+      expect(result.error.message).toContain('already associated');
+      expect(result.code).toBe('EMAIL_ALREADY_EXISTS');
+    });
+    
+    it('should handle missing email in token', async () => {
+      mockAppleTokenVerification({ 
+        sub: 'no-email-user',
+        email: undefined 
+      });
+      
+      const result = await authenticateWithApple(
+        'mock-token',
+        'fallback@example.com'
+      );
+      
+      expect(result.success).toBe(true);
+      expect(result.data.email).toBe('fallback@example.com');
+    });
+  });
+  ```
+
+### 4. Session Service Tests
+- [ ] Create `/check/src/services/__tests__/session-service.test.ts`:
+  ```typescript
+  describe('SessionService', () => {
+    describe('createSession', () => {
+      it('should create valid JWT token', async () => {
+        const user = await createTestUser();
+        const token = await createSessionToken(user.id);
+        
+        expect(token).toBeTruthy();
+        expect(token.split('.')).toHaveLength(3);
+        
+        const decoded = jwt.decode(token);
+        expect(decoded.userId).toBe(user.id);
+        expect(decoded.exp).toBeGreaterThan(Date.now() / 1000);
+      });
+      
+      it('should include key ID in token header', async () => {
+        const token = await createSessionToken('user123');
+        const decoded = jwt.decode(token, { complete: true });
+        
+        expect(decoded.header.kid).toBeTruthy();
+      });
+    });
+    
+    describe('verifySession', () => {
+      it('should verify valid token', async () => {
+        const userId = 'test-user';
+        const token = await createSessionToken(userId);
+        
+        const result = await verifySessionToken(token);
+        
+        expect(result.success).toBe(true);
+        expect(result.data.userId).toBe(userId);
+      });
+      
+      it('should reject expired token', async () => {
+        const token = createExpiredToken();
+        
+        const result = await verifySessionToken(token);
+        
+        expect(result.success).toBe(false);
+        expect(result.error).toBeInstanceOf(AuthenticationError);
+        expect(result.error.message).toContain('expired');
+      });
+      
+      it('should reject token with invalid signature', async () => {
+        const token = await createSessionToken('user123');
+        const tamperedToken = token.slice(0, -5) + 'xxxxx';
+        
+        const result = await verifySessionToken(tamperedToken);
+        
+        expect(result.success).toBe(false);
+        expect(result.error.message).toContain('Invalid token');
+      });
+    });
+  });
+  ```
+
+### 5. Auth Middleware Tests
+- [ ] Create `/check/src/middleware/__tests__/auth.test.ts`:
+  ```typescript
+  describe('Auth Middleware', () => {
+    describe('requireAuth', () => {
+      it('should pass with valid token', async () => {
+        const token = await createTestToken('user123');
+        const req = createMockRequest({
+          headers: { authorization: `Bearer ${token}` }
+        });
+        const res = createMockResponse();
+        const next = jest.fn();
+        
+        await requireAuth(req, res, next);
+        
+        expect(next).toHaveBeenCalledWith();
+        expect(req.userId).toBe('user123');
+      });
+      
+      it('should reject missing authorization header', async () => {
+        const req = createMockRequest({ headers: {} });
+        const res = createMockResponse();
+        const next = jest.fn();
+        
+        await requireAuth(req, res, next);
+        
+        expect(next).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.stringContaining('Missing or invalid Bearer token')
+          })
+        );
+      });
+      
+      it('should reject malformed authorization header', async () => {
+        const req = createMockRequest({
+          headers: { authorization: 'NotBearer token' }
+        });
+        const res = createMockResponse();
+        const next = jest.fn();
+        
+        await requireAuth(req, res, next);
+        
+        expect(next).toHaveBeenCalledWith(
+          expect.any(AuthenticationError)
+        );
+      });
+    });
+    
+    describe('requireResourceOwnership', () => {
+      it('should allow owner access', async () => {
+        const userId = 'owner123';
+        const resource = await createTestConversation({ userId });
+        
+        const middleware = requireResourceOwnership({
+          getResourceById: getConversation,
+          resourceName: 'Conversation'
+        });
+        
+        const req = createAuthenticatedRequest({
+          userId,
+          params: { id: resource.id }
+        });
+        const next = jest.fn();
+        
+        await middleware(req, {}, next);
+        
+        expect(next).toHaveBeenCalledWith();
+        expect(req.resource).toEqual(resource);
+      });
+      
+      it('should reject non-owner access', async () => {
+        const resource = await createTestConversation({ 
+          userId: 'owner123' 
+        });
+        
+        const middleware = requireResourceOwnership({
+          getResourceById: getConversation,
+          resourceName: 'Conversation'
+        });
+        
+        const req = createAuthenticatedRequest({
+          userId: 'other-user',
+          params: { id: resource.id }
+        });
+        const next = jest.fn();
+        
+        await middleware(req, {}, next);
+        
+        expect(next).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.stringContaining('do not have permission')
+          })
+        );
+      });
+    });
+  });
+  ```
+
+### 6. Integration Tests for Auth Flow
+- [ ] Create `/check/src/api/routes/__tests__/auth.integration.test.ts`:
+  ```typescript
+  describe('Auth API Integration', () => {
+    let app: Application;
+    
+    beforeAll(async () => {
+      app = await createTestApp();
+    });
+    
+    describe('POST /auth/apple', () => {
+      it('should complete full auth flow', async () => {
+        mockAppleTokenVerification({
+          sub: 'integration-user',
+          email: 'integration@example.com'
+        });
+        
+        const response = await request(app)
+          .post('/auth/apple')
+          .send({
+            identityToken: 'mock-apple-token',
+            user: { email: 'integration@example.com' }
+          });
+        
+        expect(response.status).toBe(200);
+        expect(response.body).toMatchObject({
+          success: true,
+          data: {
+            token: expect.any(String),
+            user: {
+              id: 'apple:integration-user',
+              email: 'integration@example.com'
+            }
+          }
+        });
+        
+        // Verify token works for authenticated requests
+        const token = response.body.data.token;
+        const meResponse = await request(app)
+          .get('/users/me')
+          .set('Authorization', `Bearer ${token}`);
+        
+        expect(meResponse.status).toBe(200);
+        expect(meResponse.body.data.user.id).toBe('apple:integration-user');
+      });
+      
+      it('should handle rate limiting', async () => {
+        // Make 5 failed attempts
+        for (let i = 0; i < 5; i++) {
+          await request(app)
+            .post('/auth/apple')
+            .send({ identityToken: 'invalid' });
+        }
+        
+        // 6th attempt should be rate limited
+        const response = await request(app)
+          .post('/auth/apple')
+          .send({ identityToken: 'invalid' });
+        
+        expect(response.status).toBe(429);
+        expect(response.body.error).toContain('Too many failed attempts');
+        expect(response.headers['retry-after']).toBeTruthy();
+      });
+    });
+  });
+  ```
+
+### 7. Security Tests
+- [ ] Create `/check/src/test/security/auth-security.test.ts`:
+  ```typescript
+  describe('Auth Security Tests', () => {
+    it('should not leak user existence', async () => {
+      await createTestUser({ email: 'exists@example.com' });
+      
+      // Both responses should be identical
+      const existingUserResponse = await request(app)
+        .post('/auth/apple')
+        .send({ identityToken: 'invalid-for-existing' });
+      
+      const nonExistentResponse = await request(app)
+        .post('/auth/apple')
+        .send({ identityToken: 'invalid-for-nonexistent' });
+      
+      expect(existingUserResponse.status).toBe(nonExistentResponse.status);
+      expect(existingUserResponse.body.error).toBe(nonExistentResponse.body.error);
+    });
+    
+    it('should prevent timing attacks', async () => {
+      const timings: number[] = [];
+      
+      // Measure response times
+      for (let i = 0; i < 100; i++) {
+        const start = Date.now();
+        await request(app)
+          .post('/auth/apple')
+          .send({ identityToken: 'invalid' });
+        timings.push(Date.now() - start);
+      }
+      
+      // Calculate standard deviation
+      const avg = timings.reduce((a, b) => a + b) / timings.length;
+      const stdDev = Math.sqrt(
+        timings.reduce((sum, time) => sum + Math.pow(time - avg, 2), 0) / timings.length
+      );
+      
+      // Standard deviation should be low (consistent timing)
+      expect(stdDev).toBeLessThan(50); // 50ms variance
+    });
+    
+    it('should sanitize error messages', async () => {
+      // Trigger various errors
+      const responses = await Promise.all([
+        request(app).post('/auth/apple').send({}),
+        request(app).post('/auth/apple').send({ identityToken: null }),
+        request(app).post('/auth/apple').send({ identityToken: 'a'.repeat(10000) })
+      ]);
+      
+      responses.forEach(response => {
+        // Should not expose internal details
+        expect(response.text).not.toContain('stack');
+        expect(response.text).not.toContain('sql');
+        expect(response.text).not.toContain('database');
+      });
+    });
+  });
+  ```
+
+### 8. Performance Tests
+- [ ] Create `/check/src/test/performance/auth-performance.test.ts`:
+  ```typescript
+  describe('Auth Performance', () => {
+    it('should handle concurrent logins', async () => {
+      const concurrentRequests = 100;
+      const tokens = Array(concurrentRequests).fill(null).map((_, i) => 
+        createMockAppleToken({ sub: `user${i}` })
+      );
+      
+      const start = Date.now();
+      const results = await Promise.all(
+        tokens.map(token => 
+          authenticateWithApple(token)
+        )
+      );
+      const duration = Date.now() - start;
+      
+      // All should succeed
+      expect(results.every(r => r.success)).toBe(true);
+      
+      // Should complete within reasonable time
+      expect(duration).toBeLessThan(5000); // 5 seconds for 100 requests
+      
+      // Average time per request
+      expect(duration / concurrentRequests).toBeLessThan(50); // 50ms per request
+    });
+    
+    it('should cache token verifications efficiently', async () => {
+      const token = createMockAppleToken({ sub: 'cached-user' });
+      
+      // First verification (cache miss)
+      const start1 = Date.now();
+      await verifyAppleToken(token);
+      const duration1 = Date.now() - start1;
+      
+      // Second verification (cache hit)
+      const start2 = Date.now();
+      await verifyAppleToken(token);
+      const duration2 = Date.now() - start2;
+      
+      // Cached should be much faster
+      expect(duration2).toBeLessThan(duration1 / 10);
+    });
+  });
+  ```
+
+### 9. Test Utilities and Mocks
+- [ ] Create `/check/src/test/utils/auth-test-utils.ts`:
+  ```typescript
+  export const createMockAppleToken = (payload: any): string => {
+    // Create properly formatted Apple JWT
+    const header = { alg: 'RS256', kid: 'test-key' };
+    const claims = {
+      iss: 'https://appleid.apple.com',
+      aud: 'com.example.app',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      iat: Math.floor(Date.now() / 1000),
+      ...payload
+    };
+    
+    return [
+      base64url(JSON.stringify(header)),
+      base64url(JSON.stringify(claims)),
+      'mock-signature'
+    ].join('.');
+  };
+  
+  export const mockAppleTokenVerification = (expectedPayload: any) => {
+    jest.spyOn(appleAuth, 'verifyAppleToken').mockResolvedValue({
+      success: true,
+      data: {
+        userId: expectedPayload.sub,
+        email: expectedPayload.email
+      }
+    });
+  };
+  
+  export const createAuthenticatedRequest = (overrides = {}) => {
+    return {
+      headers: { authorization: 'Bearer valid-token' },
+      userId: 'test-user',
+      ...overrides
+    };
+  };
+  ```
+
+### 10. Test Coverage Report
+- [ ] Configure coverage in `jest.config.js`:
+  ```javascript
+  module.exports = {
+    collectCoverage: true,
+    collectCoverageFrom: [
+      'src/**/*.ts',
+      '!src/**/*.test.ts',
+      '!src/test/**/*'
+    ],
+    coverageThreshold: {
+      global: {
+        branches: 80,
+        functions: 80,
+        lines: 80,
+        statements: 80
+      },
+      'src/services/user-service.ts': {
+        branches: 90,
+        functions: 90,
+        lines: 90
+      },
+      'src/middleware/auth.ts': {
+        branches: 95,
+        functions: 95,
+        lines: 95
+      }
+    }
+  };
+  ```
+
+## Acceptance Criteria
+- [ ] All auth paths have > 90% test coverage
+- [ ] Unit tests for all auth functions
+- [ ] Integration tests for complete flows
+- [ ] Security tests pass
+- [ ] Performance benchmarks met
+- [ ] Tests run in < 30 seconds
+- [ ] CI pipeline includes test runs
+
+## Test Execution Plan
+```bash
+# Run all tests
+bun test
+
+# Run with coverage
+bun test --coverage
+
+# Run specific test file
+bun test auth.test.ts
+
+# Run in watch mode
+bun test --watch
+
+# Run security tests only
+bun test security/
+```
+
+## Documentation
+- [ ] Document test patterns
+- [ ] Create testing guidelines
+- [ ] Add examples for common scenarios
+- [ ] Document mock usage

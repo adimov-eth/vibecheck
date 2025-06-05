@@ -108,3 +108,22 @@ export const sendAudioNotification = async (
   });
   log.debug("Queued audio notification", { status, audioId, conversationId, userId });
 };
+
+// Simple notification service for email functionality (used by account lockout)
+export class NotificationService {
+  static async sendEmail(options: {
+    to: string;
+    subject: string;
+    text?: string;
+    html?: string;
+  }): Promise<void> {
+    // TODO: Implement actual email sending (SendGrid, AWS SES, etc.)
+    log.info('Email notification (simulated)', {
+      to: options.to,
+      subject: options.subject
+    });
+    
+    // For now, just log the email instead of actually sending it
+    // In production, this would integrate with an email service
+  }
+}
