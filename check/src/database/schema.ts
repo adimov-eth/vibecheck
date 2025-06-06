@@ -88,7 +88,14 @@ export const subscriptions = sqliteTable('subscriptions', {
   };
 });
 
-// Note: Sessions and Notifications tables don't exist in the current schema
+// Sessions table
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  token: text('token').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull()
+});
 
 // Type exports
 export type User = typeof users.$inferSelect;

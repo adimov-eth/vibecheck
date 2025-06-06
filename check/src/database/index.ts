@@ -98,3 +98,4 @@ process.on('SIGINT', () => {
 // Export the db instance directly if needed elsewhere (e.g., migrations)
 // Note: Direct use should be limited. Prefer the exported functions.
 export { dbInstance };
+export const database = dbInstance;
