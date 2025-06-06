@@ -4,7 +4,7 @@ set -euo pipefail
 # Deployment configuration
 DEPLOY_USER="${DEPLOY_USER:-sammy}"
 DEPLOY_HOST="${DEPLOY_HOST:-165.232.180.34}"
-DEPLOY_PATH="${DEPLOY_PATH:-/home/sammy/vibecheck}"
+DEPLOY_PATH="${DEPLOY_PATH:-/home/sammy/vibecheck/check}"
 BACKUP_PATH="${BACKUP_PATH:-/home/sammy/backups}"
 
 echo "🚀 Starting deployment to ${DEPLOY_HOST}..."
@@ -42,14 +42,14 @@ if [ -n "${CI:-}" ]; then
         # Create backup
         echo "📦 Creating backup..."
         mkdir -p /home/sammy/backups
-        if [ -d /home/sammy/vibecheck ]; then
-            tar -czf /home/sammy/backups/vibecheck-$(date +%Y%m%d-%H%M%S).tar.gz -C /home/sammy vibecheck
+        if [ -d /home/sammy/vibecheck/check ]; then
+            tar -czf /home/sammy/backups/vibecheck-check-$(date +%Y%m%d-%H%M%S).tar.gz -C /home/sammy/vibecheck check
         fi
         
         # Extract new version
         echo "📂 Extracting new version..."
-        mkdir -p /home/sammy/vibecheck
-        cd /home/sammy/vibecheck
+        mkdir -p /home/sammy/vibecheck/check
+        cd /home/sammy/vibecheck/check
         tar -xzf /tmp/deploy.tar.gz
         rm /tmp/deploy.tar.gz
         
