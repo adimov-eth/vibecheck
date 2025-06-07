@@ -37,7 +37,8 @@
       "Bash(NODE_ENV=development bun test src/test/security/auth-security.test.ts -t \"should detect tampered JWT tokens\" 2 >& 1)",
       "Bash(NODE_ENV=test LOG_LEVEL=debug bun run test src/test/security/auth-security.test.ts -t \"should detect tampered JWT tokens\")",
       "Bash(NODE_ENV=test LOG_LEVEL=info bun test src/test/security/auth-security.test.ts -t \"should detect tampered JWT tokens\" 2 >& 1)",
-      "Bash(bun:*)"
+      "Bash(bun:*)",
+      "Bash(git diff:*)"
     ],
     "deny": []
   }
