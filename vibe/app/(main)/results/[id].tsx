@@ -106,15 +106,37 @@ export default function Results() {
 		return null;
 	}, [uploadStatus, hookError]);
 
-	// Calculate progress based on the current status
+	// Calculate progress based on the current status with smoother transitions
 	const finalProgress: number = useMemo(() => {
 		if (finalStatus === "completed") return 100;
-		if (finalStatus === "error") return 100; // Show 100% on error? Or last known? Let's use 100.
-		if (finalStatus === "uploading") return uploadStatus.progress;
-		if (finalStatus === "processing") {
-			// Use WS progress if available, otherwise estimate based on upload completion
-			return resultDataWs?.progress ?? (uploadStatus.completed ? 50 : 0); // Start at 50 if uploads done but no WS progress yet
+		if (finalStatus === "error") return 100;
+		
+		if (finalStatus === "uploading") {
+			// Scale upload progress to 0-33% range
+			return Math.round(uploadStatus.progress * 0.33);
 		}
+		
+		if (finalStatus === "processing") {
+			// Base progress starts at 33% when uploads complete
+			const baseProgress = 33;
+			
+			// If we have WebSocket progress, use it to fill the remaining 67%
+			if (resultDataWs?.progress !== undefined && resultDataWs.progress > 0) {
+				// Map WS progress (0-100) to our range (33-100)
+				const wsProgress = resultDataWs.progress;
+				if (wsProgress <= 50) {
+					// Transcription phase: 33-66%
+					return baseProgress + Math.round((wsProgress / 50) * 33);
+				} else {
+					// Analysis phase: 66-100%
+					return 66 + Math.round(((wsProgress - 50) / 50) * 34);
+				}
+			}
+			
+			// If no WS progress but uploads complete, show 33%
+			return uploadStatus.completed ? baseProgress : 0;
+		}
+		
 		return 0;
 	}, [
 		finalStatus,

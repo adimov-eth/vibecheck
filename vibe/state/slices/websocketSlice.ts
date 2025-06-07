@@ -290,6 +290,7 @@ export const createWebSocketSlice: StateCreator<
 									switch (message.type) {
 										case "transcript":
 											currentResult.transcript = message.payload.content;
+											// Transcript complete means we're at least 50% done
 											currentResult.progress = Math.max(
 												currentResult.progress || 0,
 												50,
@@ -319,12 +320,28 @@ export const createWebSocketSlice: StateCreator<
 													message.payload.error || "Unknown processing error";
 												currentResult.progress = 100;
 											} else {
-												if (typeof message.payload.progress === "number") {
+												// Map various processing statuses to progress values
+												const statusProgressMap: Record<string, number> = {
+													"processing_audio": 10,
+													"transcribing": 25,
+													"transcription_complete": 50,
+													"analyzing": 75,
+													"analysis_complete": 95,
+												};
+												
+												const mappedProgress = statusProgressMap[message.payload.status];
+												if (mappedProgress !== undefined) {
+													currentResult.progress = Math.max(
+														currentResult.progress || 0,
+														mappedProgress,
+													);
+												} else if (typeof message.payload.progress === "number") {
 													currentResult.progress = Math.max(
 														currentResult.progress || 0,
 														message.payload.progress,
 													);
 												}
+												
 												if (
 													currentResult.status !== "completed" &&
 													currentResult.status !== "error"
@@ -334,10 +351,20 @@ export const createWebSocketSlice: StateCreator<
 											}
 											break;
 										case "audio":
-											if (message.payload.status === "transcribed") {
+											if (message.payload.status === "processing") {
 												currentResult.progress = Math.max(
 													currentResult.progress || 0,
-													40,
+													15,
+												);
+											} else if (message.payload.status === "transcribing") {
+												currentResult.progress = Math.max(
+													currentResult.progress || 0,
+													30,
+												);
+											} else if (message.payload.status === "transcribed") {
+												currentResult.progress = Math.max(
+													currentResult.progress || 0,
+													50,
 												);
 											} else if (message.payload.status === "failed") {
 												currentResult.status = "error";

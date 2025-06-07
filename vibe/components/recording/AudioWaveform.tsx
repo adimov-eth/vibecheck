@@ -1,6 +1,6 @@
 import { animation, colors } from "@/constants/styles";
 import type React from "react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Animated, StyleSheet, View } from "react-native";
 
 interface AudioWaveformProps {
@@ -22,30 +22,61 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
 	const barValues = useMemo(() => 
 		Array(barCount)
 			.fill(0)
-			.map(() => new Animated.Value(0.2)),
+			.map(() => new Animated.Value(0.3)),
 		[barCount]
 	);
 
-	// Create phase animation - memoize to prevent recreation on re-renders
+	// Create phase animations - memoize to prevent recreation on re-renders
 	const phaseAnim = useMemo(() => new Animated.Value(0), []);
+	const idlePhaseAnim = useMemo(() => new Animated.Value(0), []);
+	
+	// Track if idle animation is running
+	const idleAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
+
+	// Idle animation effect
+	useEffect(() => {
+		// Start gentle idle animation that runs continuously
+		idleAnimationRef.current = Animated.loop(
+			Animated.sequence([
+				Animated.timing(idlePhaseAnim, {
+					toValue: 1,
+					duration: 3000,
+					useNativeDriver: false,
+				}),
+				Animated.timing(idlePhaseAnim, {
+					toValue: 0,
+					duration: 3000,
+					useNativeDriver: false,
+				}),
+			]),
+		);
+		idleAnimationRef.current.start();
+
+		return () => {
+			if (idleAnimationRef.current) {
+				idleAnimationRef.current.stop();
+			}
+		};
+	}, [idlePhaseAnim]);
 
 	useEffect(() => {
 		let phaseAnimation: Animated.CompositeAnimation | null = null;
-		let listener: string | null = null;
+		let activeListener: string | null = null;
+		let idleListener: string | null = null;
 
 		if (isActive) {
-			// Continuous phase animation
+			// Active recording animation
 			phaseAnimation = Animated.loop(
 				Animated.sequence([
 					Animated.timing(phaseAnim, {
 						toValue: 1,
 						duration: 1000,
-						useNativeDriver: true,
+						useNativeDriver: false,
 					}),
 					Animated.timing(phaseAnim, {
 						toValue: 0,
 						duration: 1000,
-						useNativeDriver: true,
+						useNativeDriver: false,
 					}),
 				]),
 			);
@@ -53,29 +84,41 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
 			// Start animation
 			phaseAnimation.start();
 
-			// Update bar heights based on phase
-			listener = phaseAnim.addListener(({ value }) => {
+			// Update bar heights based on active phase
+			activeListener = phaseAnim.addListener(({ value }) => {
 				barValues.forEach((anim, i) => {
 					const phase = (value + i / barCount) % 1;
-					const height =
-						0.2 + intensity * Math.abs(Math.sin(phase * Math.PI * 2));
-					anim.setValue(height);
+					const waveHeight = Math.abs(Math.sin(phase * Math.PI * 2));
+					const randomVariation = 0.1 + Math.random() * 0.1;
+					const height = 0.2 + (intensity * waveHeight + randomVariation) * 0.7;
+					
+					Animated.timing(anim, {
+						toValue: height,
+						duration: 100,
+						useNativeDriver: false,
+					}).start();
 				});
 			});
 		} else {
-			// Animate to resting state
-			const staticHeights = Array(barCount)
-				.fill(0)
-				.map((_, i) => {
-					return 0.2 + 0.1 * Math.sin((i / barCount) * Math.PI * 2);
+			// Idle state with subtle animation
+			idleListener = idlePhaseAnim.addListener(({ value }) => {
+				barValues.forEach((anim, i) => {
+					const normalizedPosition = i / barCount;
+					const centerDistance = Math.abs(normalizedPosition - 0.5) * 2;
+					
+					// Create a gentle wave effect
+					const waveOffset = Math.sin((value + normalizedPosition) * Math.PI * 2);
+					const baseHeight = 0.25 + (1 - centerDistance) * 0.15;
+					const variation = waveOffset * 0.05;
+					const targetHeight = baseHeight + variation;
+					
+					Animated.spring(anim, {
+						toValue: targetHeight,
+						...animation.springs.gentle,
+						speed: 2,
+						useNativeDriver: false,
+					}).start();
 				});
-
-			barValues.forEach((anim, i) => {
-				Animated.spring(anim, {
-					toValue: staticHeights[i],
-					...animation.springs.gentle,
-					useNativeDriver: true,
-				}).start();
 			});
 		}
 
@@ -84,11 +127,14 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
 			if (phaseAnimation) {
 				phaseAnimation.stop();
 			}
-			if (listener) {
-				phaseAnim.removeListener(listener);
+			if (activeListener) {
+				phaseAnim.removeListener(activeListener);
+			}
+			if (idleListener) {
+				idlePhaseAnim.removeListener(idleListener);
 			}
 		};
-	}, [isActive, barValues, phaseAnim, barCount, intensity]);
+	}, [isActive, barValues, phaseAnim, idlePhaseAnim, barCount, intensity]);
 
 	// Use key to force proper garbage collection when props change
 	const componentKey = `waveform-${barCount}-${isActive ? 'active' : 'inactive'}`;

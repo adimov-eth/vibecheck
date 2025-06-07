@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { ErrorView } from "./ErrorView";
-import { LoadingView } from "./LoadingView";
+import { AnimatedLoadingView } from "./AnimatedLoadingView";
 
 // Define the possible statuses more explicitly
 type ResultStatus = "uploading" | "processing" | "completed" | "error";
@@ -60,9 +60,10 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
 	// Handle loading state (uploading or processing)
 	if (status === "uploading" || status === "processing") {
 		return (
-			<LoadingView
+			<AnimatedLoadingView
 				progress={progress}
 				accentColor={accentColor}
+				status={status}
 				testID={testID}
 			/>
 		);
