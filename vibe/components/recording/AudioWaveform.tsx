@@ -114,8 +114,8 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
 					
 					Animated.spring(anim, {
 						toValue: targetHeight,
-						...animation.springs.gentle,
 						speed: 2,
+						bounciness: 4,
 						useNativeDriver: false,
 					}).start();
 				});
